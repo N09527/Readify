@@ -1,0 +1,93 @@
+name: Build iOS Unsigned IPA
+
+on:
+  push:
+    branches:
+      - ios
+    paths:
+      - "ios/**"
+      - ".github/workflows/build-ios.yml"
+  pull_request:
+    branches:
+      - main
+      - ios
+    paths:
+      - "ios/**"
+      - ".github/workflows/build-ios.yml"
+  workflow_dispatch:
+
+jobs:
+  build-ipa:
+    name: Build Universal iOS/iPadOS IPA (Unsigned)
+    runs-on: macos-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install XcodeGen
+        run: |
+          if ! command -v xcodegen >/dev/null 2>&1; then
+            brew install xcodegen
+          fi
+          xcodegen --version
+          xcodebuild -version
+
+      - name: Generate Xcode project
+        working-directory: ios
+        run: xcodegen generate
+
+      - name: Cache Swift Package Manager dependencies
+        uses: actions/cache@v4
+        with:
+          path: ios/build/SourcePackages
+          key: ${{ runner.os }}-spm-${{ hashFiles('ios/project.yml') }}
+          restore-keys: |
+            ${{ runner.os }}-spm-
+
+      - name: Resolve Swift packages
+        working-directory: ios
+        run: |
+          xcodebuild -resolvePackageDependencies \
+            -project Readify.xcodeproj \
+            -scheme Readify \
+            -clonedSourcePackagesDirPath "$PWD/build/SourcePackages"
+
+      - name: Build Release .app (Unsigned)
+        working-directory: ios
+        run: |
+          xcodebuild build \
+            -project Readify.xcodeproj \
+            -scheme Readify \
+            -configuration Release \
+            -destination "generic/platform=iOS" \
+            -derivedDataPath "$PWD/build/DerivedData" \
+            -clonedSourcePackagesDirPath "$PWD/build/SourcePackages" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY=""
+
+      - name: Package Readify-unsigned.ipa
+        working-directory: ios
+        run: |
+          APP_PATH="$PWD/build/DerivedData/Build/Products/Release-iphoneos/Readify.app"
+          if [ ! -d "$APP_PATH" ]; then
+            echo "Error: Readify.app not found at $APP_PATH"
+            exit 1
+          fi
+          rm -rf "$PWD/build/ipa"
+          mkdir -p "$PWD/build/ipa/Payload"
+          cp -R "$APP_PATH" "$PWD/build/ipa/Payload/Readify.app"
+          codesign --force --deep --sign - "$PWD/build/ipa/Payload/Readify.app"
+          cd "$PWD/build/ipa"
+          zip -qry "$OLDPWD/build/Readify-unsigned.ipa" Payload
+          ls -lh "$OLDPWD/build/Readify-unsigned.ipa"
+
+      - name: Upload Readify-unsigned.ipa Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Readify-unsigned-ipa
+          path: ios/build/Readify-unsigned.ipa
+          if-no-files-found: error
+          retention-days: 30

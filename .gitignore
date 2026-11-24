@@ -25,3 +25,10 @@ local.properties
 # 系統隱藏檔
 .DS_Store
 Thumbs.db
+
+# iOS / Xcode 產物與暫存
+ios/build/
+ios/DerivedData/
+ios/*.xcodeproj/
+ios/*.xcworkspace/
+*.ipa
