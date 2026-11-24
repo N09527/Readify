@@ -253,7 +253,7 @@ enum FontManager {
         }
         lock.unlock()
 
-        CTFontManagerRegisterFontsForURL(url as CFURL, .process, nil)
+        _ = CTFontManagerRegisterFontsForURL(url as CFURL, .process, nil)
         guard let descriptors = CTFontManagerCreateFontDescriptorsFromURL(url as CFURL) as? [CTFontDescriptor],
               let first = descriptors.first,
               let psName = CTFontDescriptorCopyAttribute(first, kCTFontNameAttribute) as? String else {

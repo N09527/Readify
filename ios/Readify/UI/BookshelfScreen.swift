@@ -314,30 +314,14 @@ struct BookshelfScreen: View {
             }
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                if isSelectionMode {
-                    ToolbarItem(placement: .navigationBarLeading) {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    if isSelectionMode {
                         Button {
                             exitSelectionMode()
                         } label: {
                             Image(systemName: "xmark")
                         }
-                    }
-                    ToolbarItem(placement: .principal) {
-                        Text("已選取 \(selectedBookIds.count) 本")
-                            .font(.headline)
-                    }
-                    ToolbarItem(placement: .navigationBarTrailing) {
-                        Button(allVisibleSelected ? "取消全選" : "全選") {
-                            let visibleIds = Set(filteredBooks.map { $0.id })
-                            if allVisibleSelected {
-                                selectedBookIds.subtract(visibleIds)
-                            } else {
-                                selectedBookIds.formUnion(visibleIds)
-                            }
-                        }
-                    }
-                } else {
-                    ToolbarItem(placement: .navigationBarLeading) {
+                    } else {
                         VStack(alignment: .leading, spacing: 1) {
                             Text("Readify 書架")
                                 .font(.headline.weight(.bold))
@@ -351,60 +335,93 @@ struct BookshelfScreen: View {
                                 .foregroundStyle(fgColor.opacity(0.65))
                         }
                     }
-                    ToolbarItemGroup(placement: .navigationBarTrailing) {
-                        Button {
-                            if isSearchActive {
-                                isSearchActive = false
-                                searchQuery = ""
-                            } else {
-                                isSearchActive = true
-                            }
-                        } label: {
-                            Image(systemName: isSearchActive ? "magnifyingglass.circle.fill" : "magnifyingglass")
-                        }
+                }
 
-                        Menu {
-                            ForEach(ShelfSortField.allCases) { field in
+                ToolbarItem(placement: .principal) {
+                    if isSelectionMode {
+                        Text("已選取 \(selectedBookIds.count) 本")
+                            .font(.headline)
+                    }
+                }
+
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    if isSelectionMode {
+                        Button(allVisibleSelected ? "取消全選" : "全選") {
+                            let visibleIds = Set(filteredBooks.map { $0.id })
+                            if allVisibleSelected {
+                                selectedBookIds.subtract(visibleIds)
+                            } else {
+                                selectedBookIds.formUnion(visibleIds)
+                            }
+                        }
+                    } else {
+                        HStack(spacing: 12) {
+                            Button {
+                                if isSearchActive {
+                                    isSearchActive = false
+                                    searchQuery = ""
+                                } else {
+                                    isSearchActive = true
+                                }
+                            } label: {
+                                Image(systemName: isSearchActive ? "magnifyingglass.circle.fill" : "magnifyingglass")
+                            }
+
+                            Menu {
+                                ForEach(ShelfSortField.allCases) { field in
+                                    Button {
+                                        let defaultAsc = (field != .ADDED_TIME)
+                                        let nextAsc = (sortField == field) ? sortAscending : defaultAsc
+                                        onSortChange(field, nextAsc)
+                                    } label: {
+                                        if sortField == field {
+                                            Label("依\(field.label)", systemImage: "checkmark")
+                                        } else {
+                                            Text("依\(field.label)")
+                                        }
+                                    }
+                                }
+                                Divider()
                                 Button {
-                                    let defaultAsc = (field != .ADDED_TIME)
-                                    let nextAsc = (sortField == field) ? sortAscending : defaultAsc
-                                    onSortChange(field, nextAsc)
+                                    onSortChange(sortField, true)
                                 } label: {
-                                    Label("依\(field.label)", systemImage: sortField == field ? "checkmark" : "")
+                                    if sortAscending {
+                                        Label("升序（↑）", systemImage: "checkmark")
+                                    } else {
+                                        Text("升序（↑）")
+                                    }
+                                }
+                                Button {
+                                    onSortChange(sortField, false)
+                                } label: {
+                                    if !sortAscending {
+                                        Label("降序（↓）", systemImage: "checkmark")
+                                    } else {
+                                        Text("降序（↓）")
+                                    }
+                                }
+                            } label: {
+                                Image(systemName: "arrow.up.arrow.down")
+                            }
+
+                            if !books.isEmpty {
+                                Button {
+                                    isSelectionMode = true
+                                    selectedBookIds = []
+                                } label: {
+                                    Image(systemName: "checkmark.circle")
                                 }
                             }
-                            Divider()
-                            Button {
-                                onSortChange(sortField, true)
-                            } label: {
-                                Label("升序（↑）", systemImage: sortAscending ? "checkmark" : "")
-                            }
-                            Button {
-                                onSortChange(sortField, false)
-                            } label: {
-                                Label("降序（↓）", systemImage: !sortAscending ? "checkmark" : "")
-                            }
-                        } label: {
-                            Image(systemName: "arrow.up.arrow.down")
-                        }
 
-                        if !books.isEmpty {
-                            Button {
-                                isSelectionMode = true
-                                selectedBookIds = []
-                            } label: {
-                                Image(systemName: "checkmark.circle")
+                            Button(action: onToggleEInkMode) {
+                                Image(systemName: eInkMode ? "circle.lefthalf.filled.inverse" : "circle.lefthalf.filled")
                             }
-                        }
 
-                        Button(action: onToggleEInkMode) {
-                            Image(systemName: eInkMode ? "circle.lefthalf.filled.inverse" : "circle.lefthalf.filled")
-                        }
-
-                        Button {
-                            isGridView.toggle()
-                        } label: {
-                            Image(systemName: isGridView ? "list.bullet" : "square.grid.2x2")
+                            Button {
+                                isGridView.toggle()
+                            } label: {
+                                Image(systemName: isGridView ? "list.bullet" : "square.grid.2x2")
+                            }
                         }
                     }
                 }

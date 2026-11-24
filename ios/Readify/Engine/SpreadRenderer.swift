@@ -344,6 +344,7 @@ enum SpreadRenderer {
 
         let colorSpace = CGColorSpaceCreateDeviceRGB()
 
+        let leftLocations: [CGFloat] = [0.0, 0.72, 1.0]
         ctx.saveGState()
         ctx.clip(to: CGRect(x: centerX - leftShadowWidth, y: 0, width: leftShadowWidth, height: height))
         if let leftGrad = CGGradient(
@@ -353,7 +354,7 @@ enum SpreadRenderer {
                 UIColor.black.withAlphaComponent(midDarkAlpha).cgColor,
                 UIColor.black.withAlphaComponent(maxDarkAlpha).cgColor
             ] as CFArray,
-            locations: [0.0, 0.72, 1.0]
+            locations: leftLocations
         ) {
             ctx.drawLinearGradient(
                 leftGrad,
@@ -364,6 +365,7 @@ enum SpreadRenderer {
         }
         ctx.restoreGState()
 
+        let rightLocations: [CGFloat] = [0.0, 0.35, 1.0]
         ctx.saveGState()
         ctx.clip(to: CGRect(x: centerX, y: 0, width: rightShadowWidth, height: height))
         if let rightGrad = CGGradient(
@@ -373,7 +375,7 @@ enum SpreadRenderer {
                 UIColor.black.withAlphaComponent(midDarkAlpha).cgColor,
                 UIColor.black.withAlphaComponent(0).cgColor
             ] as CFArray,
-            locations: [0.0, 0.35, 1.0]
+            locations: rightLocations
         ) {
             ctx.drawLinearGradient(
                 rightGrad,

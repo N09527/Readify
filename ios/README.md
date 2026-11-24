@@ -22,7 +22,11 @@
 ## 安裝方式（免付費 Apple Developer 帳號）
 
 ### 方法一：從 GitHub Actions 下載 `Readify-unsigned.ipa` 側載安裝（推薦）
-每次推送至 `ios` 分支（或手動觸發 Actions），`.github/workflows/build-ios.yml` 會自動在雲端 macOS 編譯並產出未簽名的 `Readify-unsigned.ipa`：
+每次推送至 `ios` 分支（或手動觸發 Actions），`.github/workflows/build-ios.yml` 會自動在雲端 macOS（Xcode 16+）編譯並產出未簽名的 `Readify-unsigned.ipa`：
+
+> **提示（Private Repo 注意事項）**：由於目前 `N09527/Readify` 為 **Private（私有）** 倉庫，GitHub Free 帳號在私有倉庫執行 `macos-latest` 會消耗 10 倍免費額度（若帳號未開啟 Actions 額度或佇列繁忙會停留在 `Queued`）。若遇到長時間排隊，你可以：
+> - 直接在你的 Mac 執行一行 `./ios/scripts/build_unsigned_ipa.sh` 本機產出完全相同的 `Readify-unsigned.ipa`（需 Xcode 16+），或
+> - 暫時將 Repo 設為 Public（公開倉庫享有無限免費 macOS Actions 額度）。
 
 1. 前往 GitHub Repo 的 **Actions → Build iOS Unsigned IPA**，點選最新一次成功的執行紀錄，在最下方 **Artifacts** 下載 `Readify-unsigned-ipa.zip` 並解壓縮取得 `Readify-unsigned.ipa`。
 2. 使用你的**免費 Apple ID** 搭配以下任一工具簽名安裝至 iPhone / iPad：

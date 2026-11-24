@@ -16,6 +16,10 @@ on:
       - ".github/workflows/build-ios.yml"
   workflow_dispatch:
 
+concurrency:
+  group: build-ios-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build-ipa:
     name: Build Universal iOS/iPadOS IPA (Unsigned)
@@ -26,13 +30,18 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Install XcodeGen
+      - name: Select latest Xcode & Install XcodeGen
         run: |
+          LATEST_XCODE=$(ls -d /Applications/Xcode_*.app 2>/dev/null | sort -V | tail -n 1 || true)
+          if [ -n "$LATEST_XCODE" ]; then
+            sudo xcode-select -s "$LATEST_XCODE/Contents/Developer"
+          fi
           if ! command -v xcodegen >/dev/null 2>&1; then
             brew install xcodegen
           fi
           xcodegen --version
           xcodebuild -version
+          swift --version
 
       - name: Generate Xcode project
         working-directory: ios

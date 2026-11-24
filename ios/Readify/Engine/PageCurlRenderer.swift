@@ -72,10 +72,11 @@ enum PageCurlRenderer {
             ? UIColor.black.withAlphaComponent(95.0 / 255.0).cgColor
             : UIColor.clear.cgColor
 
+        let slideLocations: [CGFloat] = [0.0, 1.0]
         if let grad = CGGradient(
             colorsSpace: colorSpace,
             colors: [startColor, endColor] as CFArray,
-            locations: [0.0, 1.0]
+            locations: slideLocations
         ) {
             ctx.drawLinearGradient(
                 grad,
@@ -195,6 +196,7 @@ enum PageCurlRenderer {
 
         // 2. Subtle pre-fold shadow outside Path0 (using even-odd clip rule)
         let frontShadowW = min(26, max(10, flapDepth * 0.22))
+        let frontLocations: [CGFloat] = [0.0, 0.45, 1.0]
         ctx.saveGState()
         let clipOutPath = CGMutablePath()
         clipOutPath.addRect(bounds.insetBy(dx: -200, dy: -200))
@@ -209,7 +211,7 @@ enum PageCurlRenderer {
                 UIColor.black.withAlphaComponent(isDark ? (35.0 / 255.0) : (18.0 / 255.0)).cgColor,
                 UIColor.clear.cgColor
             ] as CFArray,
-            locations: [0.0, 0.45, 1.0]
+            locations: frontLocations
         ) {
             ctx.drawLinearGradient(
                 frontGrad,
@@ -223,6 +225,7 @@ enum PageCurlRenderer {
         // 3. Revealed next page + seamless cast shadow strictly along ridge D -> I
         let castW = min(86, max(20, flapDepth * 0.55))
         let underOverlap: CGFloat = 3
+        let castLocations: [CGFloat] = [0.0, 0.22, 0.58, 1.0]
         ctx.saveGState()
         ctx.addPath(path0)
         ctx.clip()
@@ -236,7 +239,7 @@ enum PageCurlRenderer {
                 UIColor.black.withAlphaComponent(isDark ? (42.0 / 255.0) : (22.0 / 255.0)).cgColor,
                 UIColor.clear.cgColor
             ] as CFArray,
-            locations: [0.0, 0.22, 0.58, 1.0]
+            locations: castLocations
         ) {
             ctx.drawLinearGradient(
                 castGrad,
@@ -267,6 +270,7 @@ enum PageCurlRenderer {
         ctx.restoreGState()
 
         let highlightAlpha: CGFloat = isDark ? (20.0 / 255.0) : (56.0 / 255.0)
+        let curlLocations: [CGFloat] = [0.0, 0.20, 0.65, 1.0]
         if let curlGrad = CGGradient(
             colorsSpace: colorSpace,
             colors: [
@@ -275,7 +279,7 @@ enum PageCurlRenderer {
                 UIColor.clear.cgColor,
                 UIColor.black.withAlphaComponent(isDark ? (85.0 / 255.0) : (46.0 / 255.0)).cgColor
             ] as CFArray,
-            locations: [0.0, 0.20, 0.65, 1.0]
+            locations: curlLocations
         ) {
             ctx.drawLinearGradient(
                 curlGrad,

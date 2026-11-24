@@ -53,9 +53,3 @@ targets:
         product: Unrar
       - package: OpenCCSwift
         product: OpenCCSwift
-      - sdk: PDFKit.framework
-      - sdk: CoreText.framework
-      - sdk: ImageIO.framework
-      - sdk: AVFoundation.framework
-      - sdk: MediaPlayer.framework
-      - sdk: UniformTypeIdentifiers.framework
