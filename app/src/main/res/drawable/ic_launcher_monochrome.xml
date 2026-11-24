@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <group
+        android:pivotX="54"
+        android:pivotY="54"
+        android:scaleX="1.15"
+        android:scaleY="1.15">
+        <!-- Left open page: text reading lines -->
+        <path
+            android:fillColor="#000000"
+            android:fillType="evenOdd"
+            android:pathData="M29,34 C29,32.3 30.5,31.2 32.1,31.6 L51.5,37.2 C52.4,37.5 53,38.3 53,39.2 L53,73.5 C53,75.2 51.4,76.3 49.8,75.8 L31.2,70.4 C29.9,70 29,68.8 29,67.5 Z M34,40.5 L48,44.6 L48,47.2 L34,43.1 Z M34,47.5 L48,51.6 L48,54.2 L34,50.1 Z M34,54.5 L48,58.6 L48,61.2 L34,57.1 Z M34,61.5 L44.5,64.6 L44.5,67.2 L34,64.1 Z" />
+        <!-- Right open page: comic panels -->
+        <path
+            android:fillColor="#000000"
+            android:fillType="evenOdd"
+            android:pathData="M55,39.2 C55,38.3 55.6,37.5 56.5,37.2 L75.9,31.6 C77.5,31.2 79,32.3 79,34 L79,67.5 C79,68.8 78.1,70 76.8,70.4 L58.2,75.8 C56.6,76.3 55,75.2 55,73.5 Z M58.5,40.8 L66.5,38.5 L66.5,47.8 L58.5,50.1 Z M68.5,37.9 L75.5,35.9 L75.5,45.2 L68.5,47.2 Z M58.5,52.3 L75.5,47.4 L75.5,56.5 L58.5,61.4 Z M58.5,63.6 L65.5,61.6 L65.5,69.8 L58.5,71.8 Z M67.5,61 L75.5,58.7 L75.5,66.9 L67.5,69.2 Z" />
+    </group>
+</vector>

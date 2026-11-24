@@ -1,0 +1,27 @@
+# Gradle 與編譯暫存
+.gradle/
+build/
+app/build/
+captures/
+.cxx/
+.externalNativeBuild/
+
+# 本機路徑與 IDE 設定
+local.properties
+.idea/
+*.iml
+*.ipr
+*.iws
+
+# 打包產物與簽章金鑰
+*.apk
+*.ap_
+*.aab
+*.dex
+*.class
+*.jks
+*.keystore
+
+# 系統隱藏檔
+.DS_Store
+Thumbs.db
