@@ -98,12 +98,13 @@ struct BookshelfScreen: View {
     }
 
     var body: some View {
-        NavigationStack {
-            ZStack(alignment: .bottomTrailing) {
-                bgColor.ignoresSafeArea()
+        ZStack(alignment: .bottomTrailing) {
+            bgColor.ignoresSafeArea()
 
-                VStack(spacing: 6) {
-                    if isSearchActive && !isSelectionMode {
+            VStack(spacing: 6) {
+                bookshelfHeaderBar
+
+                if isSearchActive && !isSelectionMode {
                         HStack(spacing: 8) {
                             Image(systemName: "magnifyingglass")
                                 .foregroundStyle(.secondary)
@@ -311,125 +312,10 @@ struct BookshelfScreen: View {
                     .padding(.trailing, 18)
                     .padding(.bottom, 18)
                 }
-            }
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .navigationBarLeading) {
-                    if isSelectionMode {
-                        Button {
-                            exitSelectionMode()
-                        } label: {
-                            Image(systemName: "xmark")
-                        }
-                    } else {
-                        VStack(alignment: .leading, spacing: 1) {
-                            Text("Readify 書架")
-                                .font(.headline.weight(.bold))
-                                .foregroundStyle(fgColor)
-                            let countText = filteredBooks.count != books.count
-                                ? "\(filteredBooks.count)/\(books.count) 本"
-                                : "\(books.count) 本"
-                            let arrow = sortAscending ? "↑" : "↓"
-                            Text("\(countText) · \(sortField.label)\(arrow)\(eInkMode ? " · 電子紙" : "")")
-                                .font(.caption2)
-                                .foregroundStyle(fgColor.opacity(0.65))
-                        }
-                    }
-                }
-
-                ToolbarItem(placement: .principal) {
-                    if isSelectionMode {
-                        Text("已選取 \(selectedBookIds.count) 本")
-                            .font(.headline)
-                    }
-                }
-
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    if isSelectionMode {
-                        Button(allVisibleSelected ? "取消全選" : "全選") {
-                            let visibleIds = Set(filteredBooks.map { $0.id })
-                            if allVisibleSelected {
-                                selectedBookIds.subtract(visibleIds)
-                            } else {
-                                selectedBookIds.formUnion(visibleIds)
-                            }
-                        }
-                    } else {
-                        HStack(spacing: 12) {
-                            Button {
-                                if isSearchActive {
-                                    isSearchActive = false
-                                    searchQuery = ""
-                                } else {
-                                    isSearchActive = true
-                                }
-                            } label: {
-                                Image(systemName: isSearchActive ? "magnifyingglass.circle.fill" : "magnifyingglass")
-                            }
-
-                            Menu {
-                                ForEach(ShelfSortField.allCases) { field in
-                                    Button {
-                                        let defaultAsc = (field != .ADDED_TIME)
-                                        let nextAsc = (sortField == field) ? sortAscending : defaultAsc
-                                        onSortChange(field, nextAsc)
-                                    } label: {
-                                        if sortField == field {
-                                            Label("依\(field.label)", systemImage: "checkmark")
-                                        } else {
-                                            Text("依\(field.label)")
-                                        }
-                                    }
-                                }
-                                Divider()
-                                Button {
-                                    onSortChange(sortField, true)
-                                } label: {
-                                    if sortAscending {
-                                        Label("升序（↑）", systemImage: "checkmark")
-                                    } else {
-                                        Text("升序（↑）")
-                                    }
-                                }
-                                Button {
-                                    onSortChange(sortField, false)
-                                } label: {
-                                    if !sortAscending {
-                                        Label("降序（↓）", systemImage: "checkmark")
-                                    } else {
-                                        Text("降序（↓）")
-                                    }
-                                }
-                            } label: {
-                                Image(systemName: "arrow.up.arrow.down")
-                            }
-
-                            if !books.isEmpty {
-                                Button {
-                                    isSelectionMode = true
-                                    selectedBookIds = []
-                                } label: {
-                                    Image(systemName: "checkmark.circle")
-                                }
-                            }
-
-                            Button(action: onToggleEInkMode) {
-                                Image(systemName: eInkMode ? "circle.lefthalf.filled.inverse" : "circle.lefthalf.filled")
-                            }
-
-                            Button {
-                                isGridView.toggle()
-                            } label: {
-                                Image(systemName: isGridView ? "list.bullet" : "square.grid.2x2")
-                            }
-                        }
-                    }
-                }
-            }
-            .safeAreaInset(edge: .bottom) {
-                if isSelectionMode {
-                    batchBottomBar
-                }
+        }
+        .safeAreaInset(edge: .bottom) {
+            if isSelectionMode {
+                batchBottomBar
             }
         }
         .onChange(of: allAvailableTags) { valid in
@@ -475,6 +361,193 @@ struct BookshelfScreen: View {
             }
         } message: {
             Text("刪除後會移除 App 內匯入的書檔與對應書籤（不會影響「檔案」App 其他資料夾裡的原始檔）。")
+        }
+    }
+
+    @ViewBuilder
+    private var bookshelfHeaderBar: some View {
+        if isSelectionMode {
+            HStack(spacing: 10) {
+                Button(action: exitSelectionMode) {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(fgColor)
+                        .frame(width: 36, height: 36)
+                        .background(
+                            eInkMode
+                                ? Color.white
+                                : Color(uiColor: .tertiarySystemFill)
+                        )
+                        .clipShape(Circle())
+                        .overlay {
+                            if eInkMode {
+                                Circle().strokeBorder(Color.black, lineWidth: 1)
+                            }
+                        }
+                }
+
+                Text("已選取 \(selectedBookIds.count) 本")
+                    .font(.headline.weight(.bold))
+                    .foregroundStyle(fgColor)
+                    .lineLimit(1)
+
+                Spacer(minLength: 8)
+
+                Button {
+                    let visibleIds = Set(filteredBooks.map { $0.id })
+                    if allVisibleSelected {
+                        selectedBookIds.subtract(visibleIds)
+                    } else {
+                        selectedBookIds.formUnion(visibleIds)
+                    }
+                } label: {
+                    Text(allVisibleSelected ? "取消全選" : "全選")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(fgColor)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 7)
+                        .background(
+                            eInkMode
+                                ? Color.white
+                                : Color(uiColor: .tertiarySystemFill)
+                        )
+                        .clipShape(Capsule())
+                        .overlay {
+                            if eInkMode {
+                                Capsule().strokeBorder(Color.black, lineWidth: 1)
+                            }
+                        }
+                }
+            }
+            .padding(.horizontal, 14)
+            .padding(.top, 6)
+            .padding(.bottom, 4)
+        } else {
+            let countText = filteredBooks.count != books.count
+                ? "\(filteredBooks.count)/\(books.count) 本"
+                : "\(books.count) 本"
+            let arrow = sortAscending ? "↑" : "↓"
+
+            HStack(alignment: .center, spacing: 8) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Readify 書架")
+                        .font(.title3.weight(.bold))
+                        .foregroundStyle(fgColor)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.85)
+
+                    Text("\(countText) · \(sortField.label)\(arrow)\(eInkMode ? " · 電子紙" : "")")
+                        .font(.caption)
+                        .foregroundStyle(fgColor.opacity(0.65))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+                }
+                .layoutPriority(1)
+
+                Spacer(minLength: 6)
+
+                HStack(spacing: 2) {
+                    Button {
+                        if isSearchActive {
+                            isSearchActive = false
+                            searchQuery = ""
+                        } else {
+                            isSearchActive = true
+                        }
+                    } label: {
+                        Image(systemName: isSearchActive ? "magnifyingglass.circle.fill" : "magnifyingglass")
+                            .font(.system(size: 16, weight: .medium))
+                            .foregroundStyle(fgColor)
+                            .frame(width: 36, height: 36)
+                    }
+
+                    Menu {
+                        ForEach(ShelfSortField.allCases) { field in
+                            Button {
+                                let defaultAsc = (field != .ADDED_TIME)
+                                let nextAsc = (sortField == field) ? sortAscending : defaultAsc
+                                onSortChange(field, nextAsc)
+                            } label: {
+                                if sortField == field {
+                                    Label("依\(field.label)", systemImage: "checkmark")
+                                } else {
+                                    Text("依\(field.label)")
+                                }
+                            }
+                        }
+                        Divider()
+                        Button {
+                            onSortChange(sortField, true)
+                        } label: {
+                            if sortAscending {
+                                Label("升序（↑）", systemImage: "checkmark")
+                            } else {
+                                Text("升序（↑）")
+                            }
+                        }
+                        Button {
+                            onSortChange(sortField, false)
+                        } label: {
+                            if !sortAscending {
+                                Label("降序（↓）", systemImage: "checkmark")
+                            } else {
+                                Text("降序（↓）")
+                            }
+                        }
+                    } label: {
+                        Image(systemName: "arrow.up.arrow.down")
+                            .font(.system(size: 16, weight: .medium))
+                            .foregroundStyle(fgColor)
+                            .frame(width: 36, height: 36)
+                    }
+
+                    if !books.isEmpty {
+                        Button {
+                            isSelectionMode = true
+                            selectedBookIds = []
+                        } label: {
+                            Image(systemName: "checkmark.circle")
+                                .font(.system(size: 16, weight: .medium))
+                                .foregroundStyle(fgColor)
+                                .frame(width: 36, height: 36)
+                        }
+                    }
+
+                    Button(action: onToggleEInkMode) {
+                        Image(systemName: eInkMode ? "circle.lefthalf.filled.inverse" : "circle.lefthalf.filled")
+                            .font(.system(size: 16, weight: .medium))
+                            .foregroundStyle(fgColor)
+                            .frame(width: 36, height: 36)
+                    }
+
+                    Button {
+                        isGridView.toggle()
+                    } label: {
+                        Image(systemName: isGridView ? "list.bullet" : "square.grid.2x2")
+                            .font(.system(size: 16, weight: .medium))
+                            .foregroundStyle(fgColor)
+                            .frame(width: 36, height: 36)
+                    }
+                }
+                .padding(.horizontal, 6)
+                .padding(.vertical, 2)
+                .background(
+                    eInkMode
+                        ? Color.white
+                        : Color(uiColor: .secondarySystemFill)
+                )
+                .clipShape(Capsule())
+                .overlay {
+                    Capsule()
+                        .strokeBorder(
+                            eInkMode ? Color.black : Color.primary.opacity(0.12),
+                            lineWidth: eInkMode ? 1 : 0.5
+                        )
+                }
+            }
+            .padding(.horizontal, 14)
+            .padding(.top, 6)
+            .padding(.bottom, 4)
         }
     }
 

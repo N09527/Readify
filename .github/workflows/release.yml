@@ -7,9 +7,9 @@ on:
   workflow_dispatch:
     inputs:
       tag_name:
-        description: "發佈版本號標籤（例如 v1.1.1 或 v1.2.0）"
+        description: "發佈版本號標籤（例如 v1.1.2 或 v1.2.0）"
         required: true
-        default: "v1.1.1"
+        default: "v1.1.2"
       prerelease:
         description: "標記為預覽版（Pre-release）"
         required: false
