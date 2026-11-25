@@ -3,6 +3,7 @@ name: Build iOS Unsigned IPA
 on:
   push:
     branches:
+      - main
       - ios
     paths:
       - "ios/**"

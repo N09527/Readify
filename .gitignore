@@ -32,3 +32,5 @@ ios/DerivedData/
 ios/*.xcodeproj/
 ios/*.xcworkspace/
 *.ipa
+dist/
+release-assets/
