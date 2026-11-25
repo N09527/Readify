@@ -75,6 +75,12 @@ struct BookshelfScreen: View {
         }
 
         return filtered.sorted { a, b in
+            let aRead = a.isMarkedOrFinishedRead
+            let bRead = b.isMarkedOrFinishedRead
+            if aRead != bRead {
+                return !aRead
+            }
+
             let cmp: Int = {
                 switch sortField {
                 case .ADDED_TIME:

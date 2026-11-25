@@ -157,6 +157,12 @@ fun BookshelfScreen(
         }
 
         val comparator = Comparator<BookItem> { a, b ->
+            val aRead = a.isMarkedOrFinishedRead
+            val bRead = b.isMarkedOrFinishedRead
+            if (aRead != bRead) {
+                return@Comparator if (aRead) 1 else -1
+            }
+
             val primary = when (sortField) {
                 ShelfSortField.ADDED_TIME -> a.addedTime.compareTo(b.addedTime)
                 ShelfSortField.TITLE -> NaturalSort.compareNatural(a.title.lowercase(), b.title.lowercase())
