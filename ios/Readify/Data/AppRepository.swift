@@ -1,7 +1,7 @@
 import CryptoKit
 import Foundation
 
-final class AppRepository {
+final class AppRepository: @unchecked Sendable {
     static let shared = AppRepository()
 
     let documentsDir: URL
@@ -12,6 +12,8 @@ final class AppRepository {
     private let booksJsonURL: URL
     private let bookmarksJsonURL: URL
     private let settingsJsonURL: URL
+    private let cloudSyncConfigURL: URL
+    private let syncMetaURL: URL
     private let ioLock = NSRecursiveLock()
 
     private struct FolderFileCandidate {
@@ -38,6 +40,8 @@ final class AppRepository {
         self.booksJsonURL = appSupportDir.appendingPathComponent("bookshelf.json")
         self.bookmarksJsonURL = appSupportDir.appendingPathComponent("bookmarks.json")
         self.settingsJsonURL = appSupportDir.appendingPathComponent("reader_settings.json")
+        self.cloudSyncConfigURL = appSupportDir.appendingPathComponent("cloud_sync_config.json")
+        self.syncMetaURL = appSupportDir.appendingPathComponent("sync_meta.json")
     }
 
     // MARK: - Container-Resilient Path Resolution
@@ -619,6 +623,10 @@ final class AppRepository {
         }
         saveBooks(current.filter { !bookIds.contains($0.id) })
         let allBm = loadAllBookmarks()
+        let removedBmIds = Set(allBm.filter { bookIds.contains($0.bookId) }.map { $0.id })
+        if !removedBmIds.isEmpty {
+            saveDeletedBookmarkIds(loadDeletedBookmarkIds().union(removedBmIds))
+        }
         saveAllBookmarks(allBm.filter { !bookIds.contains($0.bookId) })
     }
 
@@ -796,7 +804,142 @@ final class AppRepository {
     }
 
     func deleteBookmark(_ bookmarkId: String) {
+        saveDeletedBookmarkIds(loadDeletedBookmarkIds().union([bookmarkId]))
         saveAllBookmarks(loadAllBookmarks().filter { $0.id != bookmarkId })
+    }
+
+    // MARK: - Sync Metadata (Tombstones & Settings Timestamp)
+
+    private func loadSyncMetaDict() -> [String: Any] {
+        guard FileManager.default.fileExists(atPath: syncMetaURL.path),
+              let data = try? Data(contentsOf: syncMetaURL),
+              let obj = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else {
+            return [:]
+        }
+        return obj
+    }
+
+    private func saveSyncMetaDict(_ obj: [String: Any]) {
+        if let data = try? JSONSerialization.data(withJSONObject: obj, options: [.prettyPrinted]) {
+            try? data.write(to: syncMetaURL, options: .atomic)
+        }
+    }
+
+    func loadDeletedBookmarkIds() -> Set<String> {
+        ioLock.lock()
+        defer { ioLock.unlock() }
+        guard let arr = loadSyncMetaDict()["deletedBookmarkIds"] as? [String] else { return [] }
+        return Set(arr.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty })
+    }
+
+    func saveDeletedBookmarkIds(_ ids: Set<String>) {
+        ioLock.lock()
+        defer { ioLock.unlock() }
+        var meta = loadSyncMetaDict()
+        meta["deletedBookmarkIds"] = Array(ids)
+        saveSyncMetaDict(meta)
+    }
+
+    func loadSettingsUpdatedAtMs() -> Int64 {
+        ioLock.lock()
+        defer { ioLock.unlock() }
+        return (loadSyncMetaDict()["settingsUpdatedAtMs"] as? NSNumber)?.int64Value ?? 0
+    }
+
+    private func saveSettingsUpdatedAtMs(_ ts: Int64) {
+        var meta = loadSyncMetaDict()
+        meta["settingsUpdatedAtMs"] = ts
+        saveSyncMetaDict(meta)
+    }
+
+    // MARK: - Cloud Sync Config
+
+    func loadCloudSyncConfig() -> CloudSyncConfig {
+        ioLock.lock()
+        defer { ioLock.unlock() }
+
+        guard FileManager.default.fileExists(atPath: cloudSyncConfigURL.path),
+              let data = try? Data(contentsOf: cloudSyncConfigURL),
+              let obj = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else {
+            return CloudSyncConfig()
+        }
+
+        let wd = obj["webDav"] as? [String: Any]
+        let gd = obj["googleDrive"] as? [String: Any]
+        let od = obj["oneDrive"] as? [String: Any]
+
+        return CloudSyncConfig(
+            activeProvider: CloudProviderType(rawValue: (obj["activeProvider"] as? String) ?? "") ?? .WEBDAV,
+            syncBookFiles: (obj["syncBookFiles"] as? Bool) ?? true,
+            syncReaderSettings: (obj["syncReaderSettings"] as? Bool) ?? true,
+            lastSyncTimeMs: (obj["lastSyncTimeMs"] as? NSNumber)?.int64Value ?? 0,
+            lastSyncSummary: (obj["lastSyncSummary"] as? String) ?? "",
+            webDav: WebDavConfig(
+                serverUrl: (wd?["serverUrl"] as? String) ?? "",
+                username: (wd?["username"] as? String) ?? "",
+                password: (wd?["password"] as? String) ?? "",
+                remoteFolder: (wd?["remoteFolder"] as? String) ?? "Readify"
+            ),
+            googleDrive: GoogleDriveConfig(
+                clientId: (gd?["clientId"] as? String) ?? "",
+                clientSecret: (gd?["clientSecret"] as? String) ?? "",
+                redirectUri: (gd?["redirectUri"] as? String) ?? "http://127.0.0.1:48123/callback",
+                accessToken: (gd?["accessToken"] as? String) ?? "",
+                refreshToken: (gd?["refreshToken"] as? String) ?? "",
+                tokenExpiresAtMs: (gd?["tokenExpiresAtMs"] as? NSNumber)?.int64Value ?? 0,
+                remoteFolder: (gd?["remoteFolder"] as? String) ?? "Readify"
+            ),
+            oneDrive: OneDriveConfig(
+                clientId: (od?["clientId"] as? String) ?? "",
+                tenantId: (od?["tenantId"] as? String) ?? "common",
+                redirectUri: (od?["redirectUri"] as? String) ?? "com.inkflow.reader://oauth/onedrive",
+                accessToken: (od?["accessToken"] as? String) ?? "",
+                refreshToken: (od?["refreshToken"] as? String) ?? "",
+                tokenExpiresAtMs: (od?["tokenExpiresAtMs"] as? NSNumber)?.int64Value ?? 0,
+                remoteFolder: (od?["remoteFolder"] as? String) ?? "Readify"
+            )
+        )
+    }
+
+    func saveCloudSyncConfig(_ config: CloudSyncConfig) {
+        ioLock.lock()
+        defer { ioLock.unlock() }
+
+        let obj: [String: Any] = [
+            "activeProvider": config.activeProvider.rawValue,
+            "syncBookFiles": config.syncBookFiles,
+            "syncReaderSettings": config.syncReaderSettings,
+            "lastSyncTimeMs": config.lastSyncTimeMs,
+            "lastSyncSummary": config.lastSyncSummary,
+            "webDav": [
+                "serverUrl": config.webDav.serverUrl,
+                "username": config.webDav.username,
+                "password": config.webDav.password,
+                "remoteFolder": config.webDav.remoteFolder
+            ],
+            "googleDrive": [
+                "clientId": config.googleDrive.clientId,
+                "clientSecret": config.googleDrive.clientSecret,
+                "redirectUri": config.googleDrive.redirectUri,
+                "accessToken": config.googleDrive.accessToken,
+                "refreshToken": config.googleDrive.refreshToken,
+                "tokenExpiresAtMs": config.googleDrive.tokenExpiresAtMs,
+                "remoteFolder": config.googleDrive.remoteFolder
+            ],
+            "oneDrive": [
+                "clientId": config.oneDrive.clientId,
+                "tenantId": config.oneDrive.tenantId,
+                "redirectUri": config.oneDrive.redirectUri,
+                "accessToken": config.oneDrive.accessToken,
+                "refreshToken": config.oneDrive.refreshToken,
+                "tokenExpiresAtMs": config.oneDrive.tokenExpiresAtMs,
+                "remoteFolder": config.oneDrive.remoteFolder
+            ]
+        ]
+
+        if let data = try? JSONSerialization.data(withJSONObject: obj, options: [.prettyPrinted]) {
+            try? data.write(to: cloudSyncConfigURL, options: .atomic)
+        }
     }
 
     // MARK: - Settings Persistence
@@ -855,15 +998,33 @@ final class AppRepository {
             pdfNightInvert: (obj["pdfNightInvert"] as? Bool) ?? false,
             shelfSortField: ShelfSortField(rawValue: (obj["shelfSortField"] as? String) ?? "") ?? .ADDED_TIME,
             shelfSortAscending: (obj["shelfSortAscending"] as? Bool) ?? false,
+            shelfCoverSize: ShelfCoverSize(rawValue: (obj["shelfCoverSize"] as? String) ?? "") ?? .STANDARD,
             tapZones: tapZones
         )
     }
 
     func saveSettings(_ settings: ReaderSettings) {
+        saveSettingsWithTimestamp(settings, timestampMs: BookItem.nowMs())
+    }
+
+    func saveSettingsWithTimestamp(_ settings: ReaderSettings, timestampMs: Int64) {
         ioLock.lock()
         defer { ioLock.unlock() }
 
-        let obj: [String: Any] = [
+        var obj = serializePortableSettings(settings)
+        obj["customFontPath"] = settings.customFontPath ?? ""
+        obj["customFontName"] = settings.customFontName ?? ""
+        obj["customFontFolderBookmark"] = settings.customFontFolderBookmark ?? ""
+        obj["shelfCoverSize"] = settings.shelfCoverSize.rawValue
+
+        if let data = try? JSONSerialization.data(withJSONObject: obj, options: [.prettyPrinted]) {
+            try? data.write(to: settingsJsonURL, options: .atomic)
+        }
+        saveSettingsUpdatedAtMs(timestampMs)
+    }
+
+    func serializePortableSettings(_ settings: ReaderSettings) -> [String: Any] {
+        [
             "writingMode": settings.writingMode.rawValue,
             "verticalNaturalSwipe": settings.verticalNaturalSwipe,
             "dualPageMode": settings.dualPageMode.rawValue,
@@ -879,9 +1040,6 @@ final class AppRepository {
             "paragraphIndentChars": settings.paragraphIndentChars,
             "marginHorizontalDp": Double(settings.marginHorizontalDp),
             "marginVerticalDp": Double(settings.marginVerticalDp),
-            "customFontPath": settings.customFontPath ?? "",
-            "customFontName": settings.customFontName ?? "",
-            "customFontFolderBookmark": settings.customFontFolderBookmark ?? "",
             "chineseConvertMode": settings.chineseConvertMode.rawValue,
             "volumeKeyPageTurn": settings.volumeKeyPageTurn,
             "comicRtl": settings.comicRtl,
@@ -892,8 +1050,42 @@ final class AppRepository {
             "shelfSortAscending": settings.shelfSortAscending,
             "tapZones": settings.tapZones.map { $0.rawValue }
         ]
-        if let data = try? JSONSerialization.data(withJSONObject: obj, options: [.prettyPrinted]) {
-            try? data.write(to: settingsJsonURL, options: .atomic)
-        }
+    }
+
+    func applySyncedSettingsJson(local: ReaderSettings, obj: [String: Any]) -> ReaderSettings {
+        let tapZones: [TapAction] = {
+            if let arr = obj["tapZones"] as? [String], arr.count == 9 {
+                let mapped = arr.compactMap { TapAction(rawValue: $0) }
+                if mapped.count == 9 { return mapped }
+            }
+            return local.tapZones
+        }()
+
+        var copy = local
+        if let s = obj["writingMode"] as? String, let v = WritingMode(rawValue: s) { copy.writingMode = v }
+        if let v = obj["verticalNaturalSwipe"] as? Bool { copy.verticalNaturalSwipe = v }
+        if let s = obj["dualPageMode"] as? String, let v = DualPageMode(rawValue: s) { copy.dualPageMode = v }
+        if let v = obj["showSpineShadow"] as? Bool { copy.showSpineShadow = v }
+        if let s = obj["pageTurnAnimation"] as? String, let v = PageTurnAnimation(rawValue: s) { copy.pageTurnAnimation = v }
+        if let v = obj["eInkMode"] as? Bool { copy.eInkMode = v }
+        if let s = obj["theme"] as? String, let v = ReaderTheme(rawValue: s) { copy.theme = v }
+        if let n = obj["fontSizeSp"] as? NSNumber { copy.fontSizeSp = n.floatValue }
+        if let v = obj["fontBold"] as? Bool { copy.fontBold = v }
+        if let n = obj["letterSpacingEm"] as? NSNumber { copy.letterSpacingEm = n.floatValue }
+        if let n = obj["lineSpacingMultiplier"] as? NSNumber { copy.lineSpacingMultiplier = n.floatValue }
+        if let n = obj["paragraphSpacingEm"] as? NSNumber { copy.paragraphSpacingEm = n.floatValue }
+        if let n = obj["paragraphIndentChars"] as? NSNumber { copy.paragraphIndentChars = min(6, max(0, n.intValue)) }
+        if let n = obj["marginHorizontalDp"] as? NSNumber { copy.marginHorizontalDp = n.floatValue }
+        if let n = obj["marginVerticalDp"] as? NSNumber { copy.marginVerticalDp = n.floatValue }
+        if let s = obj["chineseConvertMode"] as? String, let v = ChineseConvertMode(rawValue: s) { copy.chineseConvertMode = v }
+        if let v = obj["volumeKeyPageTurn"] as? Bool { copy.volumeKeyPageTurn = v }
+        if let v = obj["comicRtl"] as? Bool { copy.comicRtl = v }
+        if let v = obj["pdfAutoCrop"] as? Bool { copy.pdfAutoCrop = v }
+        if let v = obj["pdfReflowMode"] as? Bool { copy.pdfReflowMode = v }
+        if let v = obj["pdfNightInvert"] as? Bool { copy.pdfNightInvert = v }
+        if let s = obj["shelfSortField"] as? String, let v = ShelfSortField(rawValue: s) { copy.shelfSortField = v }
+        if let v = obj["shelfSortAscending"] as? Bool { copy.shelfSortAscending = v }
+        copy.tapZones = tapZones
+        return copy
     }
 }

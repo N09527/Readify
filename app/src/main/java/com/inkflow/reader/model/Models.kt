@@ -32,6 +32,24 @@ enum class ShelfSortField(val label: String) {
     AUTHOR("作者")
 }
 
+enum class ShelfCoverSize(val label: String, val minWidthDp: Int) {
+    COMPACT("緊湊", 95),
+    STANDARD("標準", 115),
+    MEDIUM("中", 150),
+    LARGE("大", 200),
+    EXTRA_LARGE("特大", 265);
+
+    fun stepLarger(): ShelfCoverSize {
+        val idx = entries.indexOf(this)
+        return if (idx in 0 until entries.lastIndex) entries[idx + 1] else this
+    }
+
+    fun stepSmaller(): ShelfCoverSize {
+        val idx = entries.indexOf(this)
+        return if (idx > 0) entries[idx - 1] else this
+    }
+}
+
 data class BookItem(
     val id: String,
     val title: String,
@@ -204,6 +222,7 @@ data class ReaderSettings(
     val pdfNightInvert: Boolean = false,
     val shelfSortField: ShelfSortField = ShelfSortField.ADDED_TIME,
     val shelfSortAscending: Boolean = false,
+    val shelfCoverSize: ShelfCoverSize = ShelfCoverSize.STANDARD,
     val tapZones: List<TapAction> = defaultVerticalTapZones()
 ) {
     val effectiveTheme: ReaderTheme

@@ -63,6 +63,67 @@ enum ShelfSortField: String, Codable, CaseIterable, Identifiable {
     }
 }
 
+enum ShelfCoverSize: String, Codable, CaseIterable, Identifiable {
+    case COMPACT
+    case STANDARD
+    case MEDIUM
+    case LARGE
+    case EXTRA_LARGE
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .COMPACT: return "緊湊"
+        case .STANDARD: return "標準"
+        case .MEDIUM: return "中"
+        case .LARGE: return "大"
+        case .EXTRA_LARGE: return "特大"
+        }
+    }
+
+    var minWidth: CGFloat {
+        switch self {
+        case .COMPACT: return 95
+        case .STANDARD: return 115
+        case .MEDIUM: return 150
+        case .LARGE: return 200
+        case .EXTRA_LARGE: return 265
+        }
+    }
+
+    var gridSpacing: CGFloat {
+        switch self {
+        case .COMPACT: return 10
+        case .STANDARD: return 14
+        case .MEDIUM: return 16
+        case .LARGE: return 20
+        case .EXTRA_LARGE: return 24
+        }
+    }
+
+    var cornerRadius: CGFloat {
+        switch self {
+        case .COMPACT, .STANDARD: return 7
+        case .MEDIUM: return 9
+        case .LARGE: return 11
+        case .EXTRA_LARGE: return 13
+        }
+    }
+
+    func stepLarger() -> ShelfCoverSize {
+        let all = Self.allCases
+        guard let idx = all.firstIndex(of: self), idx + 1 < all.count else { return self }
+        return all[idx + 1]
+    }
+
+    func stepSmaller() -> ShelfCoverSize {
+        let all = Self.allCases
+        guard let idx = all.firstIndex(of: self), idx > 0 else { return self }
+        return all[idx - 1]
+    }
+}
+
 struct BookItem: Identifiable, Equatable {
     var id: String
     var title: String
@@ -309,6 +370,7 @@ struct ReaderSettings: Equatable {
     var pdfNightInvert: Bool = false
     var shelfSortField: ShelfSortField = .ADDED_TIME
     var shelfSortAscending: Bool = false
+    var shelfCoverSize: ShelfCoverSize = .STANDARD
     var tapZones: [TapAction] = ReaderSettings.defaultVerticalTapZones()
 
     var effectiveTheme: ReaderTheme {

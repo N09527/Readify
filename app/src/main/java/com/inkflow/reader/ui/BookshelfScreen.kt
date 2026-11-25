@@ -8,6 +8,8 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
@@ -28,7 +30,10 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -36,8 +41,10 @@ import com.inkflow.reader.model.BookContentType
 import com.inkflow.reader.model.BookFormat
 import com.inkflow.reader.model.BookItem
 import com.inkflow.reader.model.ReadStatusFilter
+import com.inkflow.reader.model.ShelfCoverSize
 import com.inkflow.reader.model.ShelfSortField
 import com.inkflow.reader.parser.NaturalSort
+import kotlinx.coroutines.delay
 import java.io.File
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -47,6 +54,7 @@ fun BookshelfScreen(
     eInkMode: Boolean,
     sortField: ShelfSortField,
     sortAscending: Boolean,
+    coverSize: ShelfCoverSize,
     isImporting: Boolean,
     importStatusMessage: String?,
     onDismissStatus: () -> Unit,
@@ -62,10 +70,14 @@ fun BookshelfScreen(
     onBatchSetReadStatus: (Set<String>, Boolean) -> Unit,
     onUpdateBookContentType: (BookItem, BookContentType) -> Unit,
     onSortChange: (ShelfSortField, Boolean) -> Unit,
+    onCoverSizeChange: (ShelfCoverSize) -> Unit,
     onToggleEInkMode: () -> Unit,
     onOpenCloudSync: () -> Unit
 ) {
     var isGridView by remember { mutableStateOf(true) }
+    val haptic = LocalHapticFeedback.current
+    val currentCoverSizeState = rememberUpdatedState(coverSize)
+    val currentOnCoverSizeChange = rememberUpdatedState(onCoverSizeChange)
 
     // Separate, orthogonal filters: Read Status vs Multi-Tags vs Search Query
     var selectedStatus by remember { mutableStateOf(ReadStatusFilter.ALL) }
@@ -73,6 +85,16 @@ fun BookshelfScreen(
     var isSearchActive by remember { mutableStateOf(false) }
     var searchQuery by remember { mutableStateOf("") }
     var showSortMenu by remember { mutableStateOf(false) }
+    var showViewMenu by remember { mutableStateOf(false) }
+    var zoomToastText by remember { mutableStateOf<String?>(null) }
+    var zoomToastTick by remember { mutableIntStateOf(0) }
+
+    LaunchedEffect(zoomToastTick) {
+        if (zoomToastTick > 0) {
+            delay(1300L)
+            zoomToastText = null
+        }
+    }
 
     var editingBook by remember { mutableStateOf<BookItem?>(null) }
 
@@ -320,24 +342,103 @@ fun BookshelfScreen(
                             }
                         }
                         if (books.isNotEmpty()) {
-                            IconButton(onClick = {
-                                isSelectionMode = true
-                                selectedBookIds = emptySet()
-                            }) {
+                            IconButton(
+                                onClick = {
+                                    isSelectionMode = true
+                                    selectedBookIds = emptySet()
+                                },
+                                modifier = Modifier.size(38.dp)
+                            ) {
                                 Icon(Icons.Default.CheckBox, contentDescription = "多選管理")
                             }
                         }
-                        IconButton(onClick = onOpenCloudSync) {
+                        IconButton(onClick = onOpenCloudSync, modifier = Modifier.size(38.dp)) {
                             Icon(Icons.Default.CloudSync, contentDescription = "雲端同步")
                         }
-                        IconButton(onClick = onToggleEInkMode) {
+                        IconButton(onClick = onToggleEInkMode, modifier = Modifier.size(38.dp)) {
                             Icon(Icons.Default.Contrast, contentDescription = "電子紙模式")
                         }
-                        IconButton(onClick = { isGridView = !isGridView }) {
-                            Icon(
-                                imageVector = if (isGridView) Icons.AutoMirrored.Filled.ViewList else Icons.Default.GridView,
-                                contentDescription = "切換檢視"
-                            )
+                        Box {
+                            IconButton(onClick = { showViewMenu = true }, modifier = Modifier.size(38.dp)) {
+                                Icon(
+                                    imageVector = if (isGridView) Icons.Default.GridView else Icons.AutoMirrored.Filled.ViewList,
+                                    contentDescription = "檢視與書封大小"
+                                )
+                            }
+                            DropdownMenu(
+                                expanded = showViewMenu,
+                                onDismissRequest = { showViewMenu = false }
+                            ) {
+                                DropdownMenuItem(
+                                    text = {
+                                        Text(
+                                            text = "網格書封檢視",
+                                            fontWeight = if (isGridView) FontWeight.Bold else FontWeight.Normal
+                                        )
+                                    },
+                                    leadingIcon = {
+                                        if (isGridView) {
+                                            Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(18.dp))
+                                        }
+                                    },
+                                    onClick = {
+                                        isGridView = true
+                                        showViewMenu = false
+                                    }
+                                )
+                                DropdownMenuItem(
+                                    text = {
+                                        Text(
+                                            text = "清單檢視",
+                                            fontWeight = if (!isGridView) FontWeight.Bold else FontWeight.Normal
+                                        )
+                                    },
+                                    leadingIcon = {
+                                        if (!isGridView) {
+                                            Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(18.dp))
+                                        }
+                                    },
+                                    onClick = {
+                                        isGridView = false
+                                        showViewMenu = false
+                                    }
+                                )
+                                HorizontalDivider()
+                                Text(
+                                    text = "書封大小（亦支援雙指縮放）",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                                )
+                                ShelfCoverSize.entries.forEach { sizeOption ->
+                                    val selected = isGridView && coverSize == sizeOption
+                                    val titleText = if (sizeOption == ShelfCoverSize.STANDARD) {
+                                        "${sizeOption.label}（預設）"
+                                    } else {
+                                        sizeOption.label
+                                    }
+                                    DropdownMenuItem(
+                                        text = {
+                                            Text(
+                                                text = titleText,
+                                                fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal
+                                            )
+                                        },
+                                        leadingIcon = {
+                                            if (selected) {
+                                                Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(18.dp))
+                                            }
+                                        },
+                                        onClick = {
+                                            isGridView = true
+                                            onCoverSizeChange(sizeOption)
+                                            zoomToastText = "書封尺寸：${sizeOption.label}"
+                                            zoomToastTick++
+                                            showViewMenu = false
+                                        }
+                                    )
+                                }
+                            }
                         }
                     }
                 )
@@ -590,33 +691,110 @@ fun BookshelfScreen(
                     }
                 }
             } else if (isGridView) {
-                LazyVerticalGrid(
-                    columns = GridCells.Adaptive(minSize = 112.dp),
-                    contentPadding = PaddingValues(12.dp, 8.dp, 12.dp, 88.dp),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    verticalArrangement = Arrangement.spacedBy(14.dp)
+                val hSpacing = when (coverSize) {
+                    ShelfCoverSize.COMPACT -> 10.dp
+                    ShelfCoverSize.STANDARD -> 12.dp
+                    ShelfCoverSize.MEDIUM -> 14.dp
+                    ShelfCoverSize.LARGE -> 18.dp
+                    ShelfCoverSize.EXTRA_LARGE -> 22.dp
+                }
+                val vSpacing = hSpacing + 2.dp
+
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .pointerInput(isGridView) {
+                            awaitEachGesture {
+                                var accumScale = 1f
+                                do {
+                                    val event = awaitPointerEvent()
+                                    val pressedCount = event.changes.count { it.pressed }
+                                    if (pressedCount >= 2) {
+                                        val zoom = event.calculateZoom()
+                                        if (zoom > 0f && zoom != 1f) {
+                                            accumScale *= zoom
+                                            val cur = currentCoverSizeState.value
+                                            if (accumScale >= 1.28f) {
+                                                val next = cur.stepLarger()
+                                                accumScale = 1f
+                                                if (next != cur) {
+                                                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                                    currentOnCoverSizeChange.value(next)
+                                                    zoomToastText = "書封尺寸：${next.label}"
+                                                    zoomToastTick++
+                                                }
+                                            } else if (accumScale <= 0.78f) {
+                                                val prev = cur.stepSmaller()
+                                                accumScale = 1f
+                                                if (prev != cur) {
+                                                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                                    currentOnCoverSizeChange.value(prev)
+                                                    zoomToastText = "書封尺寸：${prev.label}"
+                                                    zoomToastTick++
+                                                }
+                                            }
+                                            event.changes.forEach { change ->
+                                                if (change.position != change.previousPosition) {
+                                                    change.consume()
+                                                }
+                                            }
+                                        }
+                                    } else {
+                                        accumScale = 1f
+                                    }
+                                } while (event.changes.any { it.pressed })
+                            }
+                        }
                 ) {
-                    items(filteredBooks, key = { it.id }) { book ->
-                        val isSelected = book.id in selectedBookIds
-                        BookGridCard(
-                            book = book,
-                            eInkMode = eInkMode,
-                            isSelectionMode = isSelectionMode,
-                            isSelected = isSelected,
-                            onClick = {
-                                if (isSelectionMode) toggleBookSelection(book.id)
-                                else onOpenBook(book)
-                            },
-                            onLongClick = {
-                                if (!isSelectionMode) {
-                                    isSelectionMode = true
-                                    selectedBookIds = setOf(book.id)
-                                } else {
-                                    toggleBookSelection(book.id)
-                                }
-                            },
-                            onMoreClick = { editingBook = book }
-                        )
+                    LazyVerticalGrid(
+                        columns = GridCells.Adaptive(minSize = coverSize.minWidthDp.dp),
+                        contentPadding = PaddingValues(12.dp, 8.dp, 12.dp, 88.dp),
+                        horizontalArrangement = Arrangement.spacedBy(hSpacing),
+                        verticalArrangement = Arrangement.spacedBy(vSpacing),
+                        modifier = Modifier.fillMaxSize()
+                    ) {
+                        items(filteredBooks, key = { it.id }) { book ->
+                            val isSelected = book.id in selectedBookIds
+                            BookGridCard(
+                                book = book,
+                                coverSize = coverSize,
+                                eInkMode = eInkMode,
+                                isSelectionMode = isSelectionMode,
+                                isSelected = isSelected,
+                                onClick = {
+                                    if (isSelectionMode) toggleBookSelection(book.id)
+                                    else onOpenBook(book)
+                                },
+                                onLongClick = {
+                                    if (!isSelectionMode) {
+                                        isSelectionMode = true
+                                        selectedBookIds = setOf(book.id)
+                                    } else {
+                                        toggleBookSelection(book.id)
+                                    }
+                                },
+                                onMoreClick = { editingBook = book }
+                            )
+                        }
+                    }
+
+                    zoomToastText?.let { toast ->
+                        Surface(
+                            color = if (eInkMode) Color.Black else Color(0xD9111827),
+                            shape = CircleShape,
+                            shadowElevation = if (eInkMode) 0.dp else 4.dp,
+                            modifier = Modifier
+                                .align(Alignment.TopCenter)
+                                .padding(top = 12.dp)
+                        ) {
+                            Text(
+                                text = toast,
+                                color = Color.White,
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.SemiBold,
+                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 7.dp)
+                            )
+                        }
                     }
                 }
             } else {
@@ -1073,6 +1251,7 @@ private fun ReadStatusCornerBadge(
 @Composable
 private fun BookGridCard(
     book: BookItem,
+    coverSize: ShelfCoverSize,
     eInkMode: Boolean,
     isSelectionMode: Boolean,
     isSelected: Boolean,
@@ -1086,11 +1265,26 @@ private fun BookGridCard(
         eInkMode -> BorderStroke(1.dp, Color.Black)
         else -> null
     }
+    val cornerRadius = when (coverSize) {
+        ShelfCoverSize.COMPACT, ShelfCoverSize.STANDARD -> 6.dp
+        ShelfCoverSize.MEDIUM -> 8.dp
+        ShelfCoverSize.LARGE -> 10.dp
+        ShelfCoverSize.EXTRA_LARGE -> 12.dp
+    }
+    val titleStyle = when (coverSize) {
+        ShelfCoverSize.COMPACT -> MaterialTheme.typography.bodySmall
+        ShelfCoverSize.STANDARD, ShelfCoverSize.MEDIUM -> MaterialTheme.typography.bodyMedium
+        ShelfCoverSize.LARGE, ShelfCoverSize.EXTRA_LARGE -> MaterialTheme.typography.titleSmall
+    }
+    val authorStyle = when (coverSize) {
+        ShelfCoverSize.LARGE, ShelfCoverSize.EXTRA_LARGE -> MaterialTheme.typography.bodySmall
+        else -> MaterialTheme.typography.labelSmall
+    }
 
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(6.dp))
+            .clip(RoundedCornerShape(cornerRadius))
             .combinedClickable(
                 onClick = onClick,
                 onLongClick = onLongClick
@@ -1100,7 +1294,7 @@ private fun BookGridCard(
             modifier = Modifier
                 .fillMaxWidth()
                 .aspectRatio(0.70f),
-            shape = RoundedCornerShape(6.dp),
+            shape = RoundedCornerShape(cornerRadius),
             border = border,
             tonalElevation = if (eInkMode) 0.dp else 2.dp,
             color = if (eInkMode) Color.White else Color(0xFF2B3440)
@@ -1176,7 +1370,7 @@ private fun BookGridCard(
         Spacer(Modifier.height(6.dp))
         Text(
             text = book.title,
-            style = MaterialTheme.typography.bodyMedium,
+            style = titleStyle,
             fontWeight = FontWeight.Medium,
             maxLines = 2,
             overflow = TextOverflow.Ellipsis,
@@ -1184,7 +1378,7 @@ private fun BookGridCard(
         )
         Text(
             text = book.author.ifBlank { "未知作者" },
-            style = MaterialTheme.typography.labelSmall,
+            style = authorStyle,
             color = if (eInkMode) Color.DarkGray else MaterialTheme.colorScheme.onSurfaceVariant,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis

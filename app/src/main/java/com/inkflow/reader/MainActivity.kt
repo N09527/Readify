@@ -178,6 +178,7 @@ class MainActivity : ComponentActivity() {
                             eInkMode = settings.eInkMode,
                             sortField = settings.shelfSortField,
                             sortAscending = settings.shelfSortAscending,
+                            coverSize = settings.shelfCoverSize,
                             isImporting = isImporting,
                             importStatusMessage = importStatus,
                             onDismissStatus = { importStatus = null },
@@ -239,6 +240,13 @@ class MainActivity : ComponentActivity() {
                                 )
                                 settings = updated
                                 repository.saveSettings(updated)
+                            },
+                            onCoverSizeChange = { newSize ->
+                                if (settings.shelfCoverSize != newSize) {
+                                    val updated = settings.copy(shelfCoverSize = newSize)
+                                    settings = updated
+                                    repository.saveSettings(updated)
+                                }
                             },
                             onToggleEInkMode = {
                                 val updated = settings.copy(eInkMode = !settings.eInkMode)
