@@ -18,6 +18,7 @@ on:
 
 permissions:
   contents: write
+  actions: read
 
 concurrency:
   group: release-${{ github.event.inputs.tag_name || github.ref_name }}
@@ -74,8 +75,66 @@ jobs:
           path: dist/*.apk
           if-no-files-found: error
 
+  reuse-ios:
+    name: Check Prebuilt iOS IPA
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      reused: ${{ steps.reuse.outputs.reused }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 50
+
+      - name: Reuse matching iOS IPA artifact if available
+        id: reuse
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          INPUT_TAG: ${{ inputs.tag_name }}
+        run: |
+          TAG="${INPUT_TAG:-$GITHUB_REF_NAME}"
+          TARGET_TREE=$(git rev-parse HEAD:ios)
+          echo "Target ios/ tree SHA: $TARGET_TREE"
+          REUSED="false"
+
+          CANDIDATES=$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs?status=completed&per_page=20" \
+            --jq '.workflow_runs[] | select(.name == "Build iOS Unsigned IPA" and .conclusion == "success") | "\(.id) \(.head_sha)"' || true)
+
+          while read -r RUN_ID RUN_SHA; do
+            [ -z "${RUN_ID:-}" ] && continue
+            git cat-file -e "${RUN_SHA}^{commit}" 2>/dev/null || git fetch --depth=1 origin "$RUN_SHA" 2>/dev/null || true
+            CAND_TREE=$(git rev-parse "${RUN_SHA}:ios" 2>/dev/null || true)
+            if [ "$CAND_TREE" = "$TARGET_TREE" ]; then
+              echo "Found matching prebuilt iOS run $RUN_ID ($RUN_SHA), downloading artifact..."
+              rm -rf /tmp/prebuilt-ipa
+              if gh run download "$RUN_ID" -R "$GITHUB_REPOSITORY" -n Readify-unsigned-ipa -D /tmp/prebuilt-ipa; then
+                if [ -f "/tmp/prebuilt-ipa/Readify-unsigned.ipa" ]; then
+                  mkdir -p "$GITHUB_WORKSPACE/dist"
+                  cp "/tmp/prebuilt-ipa/Readify-unsigned.ipa" "$GITHUB_WORKSPACE/dist/Readify-${TAG}-ios-unsigned.ipa"
+                  ls -lh "$GITHUB_WORKSPACE/dist/"
+                  REUSED="true"
+                  break
+                fi
+              fi
+            fi
+          done <<< "$CANDIDATES"
+
+          echo "reused=${REUSED}" >> "$GITHUB_OUTPUT"
+
+      - name: Upload iOS IPA artifact
+        if: steps.reuse.outputs.reused == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-ios-ipa
+          path: dist/*.ipa
+          if-no-files-found: error
+
   build-ios:
     name: Build Universal iOS/iPadOS Unsigned IPA
+    needs: reuse-ios
+    if: needs.reuse-ios.outputs.reused != 'true'
     runs-on: macos-latest
     timeout-minutes: 30
 
@@ -161,7 +220,12 @@ jobs:
     name: Publish GitHub Release
     needs:
       - build-android
+      - reuse-ios
       - build-ios
+    if: >-
+      always() &&
+      needs.build-android.result == 'success' &&
+      (needs.reuse-ios.outputs.reused == 'true' || needs.build-ios.result == 'success')
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
