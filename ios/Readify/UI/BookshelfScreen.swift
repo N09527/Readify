@@ -7,6 +7,7 @@ struct BookshelfScreen: View {
     let eInkMode: Bool
     let sortField: ShelfSortField
     let sortAscending: Bool
+    let coverSize: ShelfCoverSize
     let isImporting: Bool
     let importStatusMessage: String?
     let onDismissStatus: () -> Void
@@ -23,7 +24,11 @@ struct BookshelfScreen: View {
     let onBatchSetReadStatus: (Set<String>, Bool) -> Void
     let onUpdateBookContentType: (BookItem, BookContentType) -> Void
     let onSortChange: (ShelfSortField, Bool) -> Void
+    let onCoverSizeChange: (ShelfCoverSize) -> Void
     let onToggleEInkMode: () -> Void
+    let onOpenCloudSync: () -> Void
+
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
     @State private var isGridView = true
     @State private var selectedStatus: ReadStatusFilter = .ALL
@@ -37,6 +42,9 @@ struct BookshelfScreen: View {
     @State private var showBatchTagSheet = false
     @State private var showBatchDeleteConfirm = false
     @State private var showImportSheet = false
+
+    @State private var zoomToastText: String?
+    @State private var zoomToastTask: Task<Void, Never>?
 
     private var allAvailableTags: [String] {
         Array(
@@ -219,38 +227,64 @@ struct BookshelfScreen: View {
                         emptyShelfView
                         Spacer()
                     } else if isGridView {
-                        ScrollView {
-                            LazyVGrid(
-                                columns: [GridItem(.adaptive(minimum: 116), spacing: 14)],
-                                spacing: 16
-                            ) {
-                                ForEach(filteredBooks) { book in
-                                    let selected = selectedBookIds.contains(book.id)
-                                    BookGridCardView(
-                                        book: book,
-                                        coverURL: repository.resolveCoverFileURL(book),
-                                        eInkMode: eInkMode,
-                                        isSelectionMode: isSelectionMode,
-                                        isSelected: selected,
-                                        onTap: {
-                                            if isSelectionMode { toggleSelection(book.id) }
-                                            else { onOpenBook(book) }
-                                        },
-                                        onLongPress: {
-                                            if !isSelectionMode {
-                                                isSelectionMode = true
-                                                selectedBookIds = [book.id]
-                                            } else {
-                                                toggleSelection(book.id)
-                                            }
-                                        },
-                                        onMoreTap: { editingBook = book }
-                                    )
+                        ZStack(alignment: .top) {
+                            ScrollView {
+                                LazyVGrid(
+                                    columns: [GridItem(.adaptive(minimum: coverSize.minWidth), spacing: coverSize.gridSpacing)],
+                                    spacing: coverSize.gridSpacing + 2
+                                ) {
+                                    ForEach(filteredBooks) { book in
+                                        let selected = selectedBookIds.contains(book.id)
+                                        BookGridCardView(
+                                            book: book,
+                                            coverURL: repository.resolveCoverFileURL(book),
+                                            coverSize: coverSize,
+                                            eInkMode: eInkMode,
+                                            isSelectionMode: isSelectionMode,
+                                            isSelected: selected,
+                                            onTap: {
+                                                if isSelectionMode { toggleSelection(book.id) }
+                                                else { onOpenBook(book) }
+                                            },
+                                            onLongPress: {
+                                                if !isSelectionMode {
+                                                    isSelectionMode = true
+                                                    selectedBookIds = [book.id]
+                                                } else {
+                                                    toggleSelection(book.id)
+                                                }
+                                            },
+                                            onMoreTap: { editingBook = book }
+                                        )
+                                    }
                                 }
+                                .padding(.horizontal, 14)
+                                .padding(.top, 6)
+                                .padding(.bottom, 96)
                             }
-                            .padding(.horizontal, 14)
-                            .padding(.top, 6)
-                            .padding(.bottom, 96)
+                            .background(
+                                BookshelfPinchDetector(
+                                    isEnabled: isGridView && !showImportSheet && !showBatchTagSheet && editingBook == nil,
+                                    onStepLarger: {
+                                        let next = coverSize.stepLarger()
+                                        if next != coverSize {
+                                            applyCoverSize(next, withHaptic: true)
+                                        }
+                                    },
+                                    onStepSmaller: {
+                                        let prev = coverSize.stepSmaller()
+                                        if prev != coverSize {
+                                            applyCoverSize(prev, withHaptic: true)
+                                        }
+                                    }
+                                )
+                            )
+
+                            if let toast = zoomToastText {
+                                ToastBannerView(message: toast)
+                                    .padding(.top, 10)
+                                    .transition(.opacity)
+                            }
                         }
                     } else {
                         ScrollView {
@@ -427,6 +461,9 @@ struct BookshelfScreen: View {
                 ? "\(filteredBooks.count)/\(books.count) 本"
                 : "\(books.count) 本"
             let arrow = sortAscending ? "↑" : "↓"
+            let btnW: CGFloat = horizontalSizeClass == .regular ? 36 : 31
+            let btnH: CGFloat = 35
+            let iconPt: CGFloat = horizontalSizeClass == .regular ? 16 : 15
 
             HStack(alignment: .center, spacing: 8) {
                 VStack(alignment: .leading, spacing: 2) {
@@ -444,9 +481,9 @@ struct BookshelfScreen: View {
                 }
                 .layoutPriority(1)
 
-                Spacer(minLength: 6)
+                Spacer(minLength: 4)
 
-                HStack(spacing: 2) {
+                HStack(spacing: horizontalSizeClass == .regular ? 3 : 1) {
                     Button {
                         if isSearchActive {
                             isSearchActive = false
@@ -456,9 +493,9 @@ struct BookshelfScreen: View {
                         }
                     } label: {
                         Image(systemName: isSearchActive ? "magnifyingglass.circle.fill" : "magnifyingglass")
-                            .font(.system(size: 16, weight: .medium))
+                            .font(.system(size: iconPt, weight: .medium))
                             .foregroundStyle(fgColor)
-                            .frame(width: 36, height: 36)
+                            .frame(width: btnW, height: btnH)
                     }
 
                     Menu {
@@ -496,9 +533,9 @@ struct BookshelfScreen: View {
                         }
                     } label: {
                         Image(systemName: "arrow.up.arrow.down")
-                            .font(.system(size: 16, weight: .medium))
+                            .font(.system(size: iconPt, weight: .medium))
                             .foregroundStyle(fgColor)
-                            .frame(width: 36, height: 36)
+                            .frame(width: btnW, height: btnH)
                     }
 
                     if !books.isEmpty {
@@ -507,29 +544,72 @@ struct BookshelfScreen: View {
                             selectedBookIds = []
                         } label: {
                             Image(systemName: "checkmark.circle")
-                                .font(.system(size: 16, weight: .medium))
+                                .font(.system(size: iconPt, weight: .medium))
                                 .foregroundStyle(fgColor)
-                                .frame(width: 36, height: 36)
+                                .frame(width: btnW, height: btnH)
                         }
+                    }
+
+                    Button(action: onOpenCloudSync) {
+                        Image(systemName: "arrow.triangle.2.circlepath.icloud")
+                            .font(.system(size: iconPt, weight: .medium))
+                            .foregroundStyle(fgColor)
+                            .frame(width: btnW, height: btnH)
                     }
 
                     Button(action: onToggleEInkMode) {
                         Image(systemName: eInkMode ? "circle.lefthalf.filled.inverse" : "circle.lefthalf.filled")
-                            .font(.system(size: 16, weight: .medium))
+                            .font(.system(size: iconPt, weight: .medium))
                             .foregroundStyle(fgColor)
-                            .frame(width: 36, height: 36)
+                            .frame(width: btnW, height: btnH)
                     }
 
-                    Button {
-                        isGridView.toggle()
+                    Menu {
+                        Button {
+                            isGridView = true
+                        } label: {
+                            if isGridView {
+                                Label("網格書封檢視", systemImage: "checkmark")
+                            } else {
+                                Label("網格書封檢視", systemImage: "square.grid.2x2")
+                            }
+                        }
+
+                        Button {
+                            isGridView = false
+                        } label: {
+                            if !isGridView {
+                                Label("清單檢視", systemImage: "checkmark")
+                            } else {
+                                Label("清單檢視", systemImage: "list.bullet")
+                            }
+                        }
+
+                        Divider()
+
+                        Section("書封大小（亦支援雙指縮放）") {
+                            ForEach(ShelfCoverSize.allCases) { sizeOpt in
+                                let labelText = sizeOpt == .STANDARD ? "\(sizeOpt.label)（預設）" : sizeOpt.label
+                                Button {
+                                    isGridView = true
+                                    applyCoverSize(sizeOpt, withHaptic: true)
+                                } label: {
+                                    if isGridView && coverSize == sizeOpt {
+                                        Label(labelText, systemImage: "checkmark")
+                                    } else {
+                                        Text(labelText)
+                                    }
+                                }
+                            }
+                        }
                     } label: {
-                        Image(systemName: isGridView ? "list.bullet" : "square.grid.2x2")
-                            .font(.system(size: 16, weight: .medium))
+                        Image(systemName: isGridView ? "square.grid.2x2" : "list.bullet")
+                            .font(.system(size: iconPt, weight: .medium))
                             .foregroundStyle(fgColor)
-                            .frame(width: 36, height: 36)
+                            .frame(width: btnW, height: btnH)
                     }
                 }
-                .padding(.horizontal, 6)
+                .padding(.horizontal, 5)
                 .padding(.vertical, 2)
                 .background(
                     eInkMode
@@ -548,6 +628,26 @@ struct BookshelfScreen: View {
             .padding(.horizontal, 14)
             .padding(.top, 6)
             .padding(.bottom, 4)
+        }
+    }
+
+    private func applyCoverSize(_ newSize: ShelfCoverSize, withHaptic: Bool) {
+        if withHaptic {
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        }
+        withAnimation(.spring(response: 0.26, dampingFraction: 0.86)) {
+            onCoverSizeChange(newSize)
+            zoomToastText = "書封尺寸：\(newSize.label)"
+        }
+        zoomToastTask?.cancel()
+        zoomToastTask = Task {
+            try? await Task.sleep(nanoseconds: 1_300_000_000)
+            guard !Task.isCancelled else { return }
+            await MainActor.run {
+                withAnimation(.easeOut(duration: 0.2)) {
+                    zoomToastText = nil
+                }
+            }
         }
     }
 
@@ -753,6 +853,7 @@ struct BookshelfScreen: View {
 private struct BookGridCardView: View {
     let book: BookItem
     let coverURL: URL?
+    let coverSize: ShelfCoverSize
     let eInkMode: Bool
     let isSelectionMode: Bool
     let isSelected: Bool
@@ -767,7 +868,28 @@ private struct BookGridCardView: View {
         return book.format.label
     }
 
+    private var titleFont: Font {
+        switch coverSize {
+        case .COMPACT:
+            return .caption.weight(.medium)
+        case .STANDARD, .MEDIUM:
+            return .footnote.weight(.medium)
+        case .LARGE, .EXTRA_LARGE:
+            return .subheadline.weight(.semibold)
+        }
+    }
+
+    private var authorFont: Font {
+        switch coverSize {
+        case .LARGE, .EXTRA_LARGE:
+            return .caption
+        default:
+            return .caption2
+        }
+    }
+
     var body: some View {
+        let radius = coverSize.cornerRadius
         VStack(alignment: .leading, spacing: 6) {
             Color.clear
                 .aspectRatio(0.70, contentMode: .fit)
@@ -783,7 +905,7 @@ private struct BookGridCardView: View {
                         VStack {
                             HStack {
                                 Text(formatBadgeLabel)
-                                    .font(.system(size: 10, weight: .semibold))
+                                    .font(.system(size: coverSize == .EXTRA_LARGE ? 11 : 10, weight: .semibold))
                                     .foregroundStyle(.white)
                                     .padding(.horizontal, 6)
                                     .padding(.vertical, 2)
@@ -833,20 +955,20 @@ private struct BookGridCardView: View {
                         }
                     }
                 }
-                .clipShape(RoundedRectangle(cornerRadius: 7))
+                .clipShape(RoundedRectangle(cornerRadius: radius))
                 .overlay(
-                    RoundedRectangle(cornerRadius: 7)
+                    RoundedRectangle(cornerRadius: radius)
                         .stroke(borderColor, lineWidth: isSelected ? 2.5 : (eInkMode ? 1 : 0.4))
                 )
 
             Text(book.title)
-                .font(.footnote.weight(.medium))
+                .font(titleFont)
                 .foregroundStyle(eInkMode ? .black : .primary)
                 .lineLimit(2)
                 .multilineTextAlignment(.leading)
 
             Text(book.author.isEmpty ? "未知作者" : book.author)
-                .font(.caption2)
+                .font(authorFont)
                 .foregroundStyle(eInkMode ? .black.opacity(0.7) : .secondary)
                 .lineLimit(1)
         }
@@ -858,6 +980,118 @@ private struct BookGridCardView: View {
     private var borderColor: Color {
         if isSelected { return eInkMode ? .black : Color.accentColor }
         return eInkMode ? .black : Color.secondary.opacity(0.25)
+    }
+}
+
+private struct BookshelfPinchDetector: UIViewRepresentable {
+    var isEnabled: Bool
+    var onStepLarger: () -> Void
+    var onStepSmaller: () -> Void
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(onStepLarger: onStepLarger, onStepSmaller: onStepSmaller)
+    }
+
+    func makeUIView(context: Context) -> PinchAttachmentView {
+        let view = PinchAttachmentView()
+        view.coordinator = context.coordinator
+        view.isPinchEnabled = isEnabled
+        return view
+    }
+
+    func updateUIView(_ uiView: PinchAttachmentView, context: Context) {
+        context.coordinator.onStepLarger = onStepLarger
+        context.coordinator.onStepSmaller = onStepSmaller
+        uiView.isPinchEnabled = isEnabled
+    }
+
+    final class Coordinator: NSObject, UIGestureRecognizerDelegate {
+        var onStepLarger: () -> Void
+        var onStepSmaller: () -> Void
+        private var anchorScale: CGFloat = 1.0
+
+        init(onStepLarger: @escaping () -> Void, onStepSmaller: @escaping () -> Void) {
+            self.onStepLarger = onStepLarger
+            self.onStepSmaller = onStepSmaller
+        }
+
+        @objc func handlePinch(_ recognizer: UIPinchGestureRecognizer) {
+            switch recognizer.state {
+            case .began:
+                anchorScale = max(0.1, recognizer.scale)
+            case .changed:
+                guard recognizer.numberOfTouches >= 2 else { return }
+                let ratio = recognizer.scale / anchorScale
+                if ratio >= 1.28 {
+                    anchorScale = recognizer.scale
+                    onStepLarger()
+                } else if ratio <= 0.78 {
+                    anchorScale = recognizer.scale
+                    onStepSmaller()
+                }
+            default:
+                anchorScale = 1.0
+            }
+        }
+
+        func gestureRecognizer(
+            _ gestureRecognizer: UIGestureRecognizer,
+            shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer
+        ) -> Bool {
+            true
+        }
+    }
+}
+
+private final class PinchAttachmentView: UIView {
+    weak var coordinator: BookshelfPinchDetector.Coordinator?
+    private weak var attachedView: UIView?
+    private var pinchRecognizer: UIPinchGestureRecognizer?
+
+    var isPinchEnabled: Bool = true {
+        didSet {
+            pinchRecognizer?.isEnabled = isPinchEnabled
+        }
+    }
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        backgroundColor = .clear
+        isUserInteractionEnabled = false
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        detachRecognizer()
+        guard let window, let coord = coordinator else { return }
+        let pinch = UIPinchGestureRecognizer(target: coord, action: #selector(BookshelfPinchDetector.Coordinator.handlePinch(_:)))
+        pinch.cancelsTouchesInView = false
+        pinch.delaysTouchesBegan = false
+        pinch.delaysTouchesEnded = false
+        pinch.delegate = coord
+        pinch.isEnabled = isPinchEnabled
+        window.addGestureRecognizer(pinch)
+        attachedView = window
+        pinchRecognizer = pinch
+    }
+
+    override func willMove(toWindow newWindow: UIWindow?) {
+        if newWindow == nil {
+            detachRecognizer()
+        }
+        super.willMove(toWindow: newWindow)
+    }
+
+    private func detachRecognizer() {
+        if let pinch = pinchRecognizer, let view = attachedView {
+            view.removeGestureRecognizer(pinch)
+        }
+        pinchRecognizer = nil
+        attachedView = nil
     }
 }
 

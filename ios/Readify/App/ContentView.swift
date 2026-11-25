@@ -8,6 +8,7 @@ struct ContentView: View {
     @State private var books: [BookItem] = []
     @State private var settings = ReaderSettings()
     @State private var activeBook: BookItem?
+    @State private var showCloudSync = false
     @State private var isReaderMenuVisible = false
 
     @State private var isImporting = false
@@ -17,7 +18,21 @@ struct ContentView: View {
 
     var body: some View {
         Group {
-            if let current = activeBook {
+            if showCloudSync {
+                CloudSyncScreen(
+                    repository: repository,
+                    eInkMode: settings.eInkMode,
+                    onSyncCompleted: {
+                        books = repository.loadBooks()
+                        settings = repository.loadSettings()
+                    },
+                    onBack: {
+                        books = repository.loadBooks()
+                        settings = repository.loadSettings()
+                        showCloudSync = false
+                    }
+                )
+            } else if let current = activeBook {
                 let useVisualReader: Bool = {
                     switch current.contentType {
                     case .COMIC: return true
@@ -91,6 +106,7 @@ struct ContentView: View {
                     eInkMode: settings.eInkMode,
                     sortField: settings.shelfSortField,
                     sortAscending: settings.shelfSortAscending,
+                    coverSize: settings.shelfCoverSize,
                     isImporting: isImporting,
                     importStatusMessage: importStatus,
                     onDismissStatus: { importStatus = nil },
@@ -154,16 +170,26 @@ struct ContentView: View {
                         settings = updated
                         repository.saveSettings(updated)
                     },
+                    onCoverSizeChange: { newSize in
+                        guard settings.shelfCoverSize != newSize else { return }
+                        var updated = settings
+                        updated.shelfCoverSize = newSize
+                        settings = updated
+                        repository.saveSettings(updated)
+                    },
                     onToggleEInkMode: {
                         var updated = settings
                         updated.eInkMode.toggle()
                         settings = updated
                         repository.saveSettings(updated)
+                    },
+                    onOpenCloudSync: {
+                        showCloudSync = true
                     }
                 )
             }
         }
-        .statusBarHidden(activeBook != nil && !isReaderMenuVisible)
+        .statusBarHidden(activeBook != nil && !showCloudSync && !isReaderMenuVisible)
         .sheet(item: $activePicker) { pickerMode in
             DocumentPickerRepresentable(
                 mode: pickerMode,
@@ -266,6 +292,11 @@ struct ContentView: View {
     }
 
     private func handleOpenExternalURL(_ url: URL) {
+        if url.scheme?.lowercased() == "com.inkflow.reader" || url.host?.lowercased() == "oauth" {
+            _ = OAuthPkceHelper.handleRedirectURL(url)
+            return
+        }
+
         let ext = url.pathExtension.lowercased()
         if FontManager.fontExtensions.contains(ext) {
             let count = FontManager.importFontFiles([url])

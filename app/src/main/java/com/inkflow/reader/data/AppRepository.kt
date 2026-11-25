@@ -764,6 +764,7 @@ class AppRepository(private val context: Context) {
                 pdfNightInvert = obj.optBoolean("pdfNightInvert", false),
                 shelfSortField = runCatching { ShelfSortField.valueOf(obj.optString("shelfSortField", ShelfSortField.ADDED_TIME.name)) }.getOrDefault(ShelfSortField.ADDED_TIME),
                 shelfSortAscending = obj.optBoolean("shelfSortAscending", false),
+                shelfCoverSize = runCatching { ShelfCoverSize.valueOf(obj.optString("shelfCoverSize", ShelfCoverSize.STANDARD.name)) }.getOrDefault(ShelfCoverSize.STANDARD),
                 tapZones = tapZones
             )
         }.getOrDefault(ReaderSettings())
@@ -778,6 +779,7 @@ class AppRepository(private val context: Context) {
             put("customFontPath", settings.customFontPath ?: "")
             put("customFontName", settings.customFontName ?: "")
             put("customFontFolderUri", settings.customFontFolderUri ?: "")
+            put("shelfCoverSize", settings.shelfCoverSize.name)
         }
         settingsJsonFile.writeText(obj.toString(2))
         saveSettingsUpdatedAtMs(timestampMs)
