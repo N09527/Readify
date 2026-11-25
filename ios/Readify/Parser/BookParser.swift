@@ -251,7 +251,7 @@ enum BookParser {
     // MARK: - EPUB Comic & Text Parsing
 
     static func inspectEpubComic(fileURL: URL, fallbackTitle: String) -> EpubComicInfo {
-        guard let archive = try? Archive(url: fileURL, accessMode: .read) else {
+        guard let archive = try? Archive(url: fileURL, accessMode: .read, pathEncoding: nil) else {
             return EpubComicInfo(isComic: false, imagePaths: [], isRtl: true, title: fallbackTitle, author: "未知作者", coverBytes: nil)
         }
 
@@ -430,7 +430,7 @@ enum BookParser {
     }
 
     private static func parseEpub(fileURL: URL, fallbackTitle: String) -> ParsedBook {
-        guard let archive = try? Archive(url: fileURL, accessMode: .read) else {
+        guard let archive = try? Archive(url: fileURL, accessMode: .read, pathEncoding: nil) else {
             return ParsedBook(
                 title: fallbackTitle,
                 author: "未知作者",
