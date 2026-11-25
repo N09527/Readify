@@ -42,7 +42,7 @@ enum VisualBookSourceFactory {
     }
 
     static func extractZipComicCover(fileURL: URL) -> Data? {
-        guard let archive = try? ZIPFoundation.Archive(url: fileURL, accessMode: .read) else { return nil }
+        guard let archive = try? ZIPFoundation.Archive(url: fileURL, accessMode: .read, pathEncoding: nil) else { return nil }
         let imageEntries = archive
             .filter { $0.type == .file && NaturalSort.isSupportedImageName($0.path) }
             .sorted { NaturalSort.lessThan($0.path, $1.path) }
@@ -122,7 +122,7 @@ private final class ZipComicSource: VisualBookSource {
     var pageCount: Int { entries.count }
 
     init(fileURL: URL) {
-        let arch = try? ZIPFoundation.Archive(url: fileURL, accessMode: .read)
+        let arch = try? ZIPFoundation.Archive(url: fileURL, accessMode: .read, pathEncoding: nil)
         self.archive = arch
         if let arch {
             self.entries = arch
@@ -137,9 +137,9 @@ private final class ZipComicSource: VisualBookSource {
         guard pageIndex >= 0 && pageIndex < entries.count, let archive else { return nil }
         return await Task.detached(priority: .userInitiated) { [weak self] in
             guard let self else { return nil }
-            self.lock.lock()
-            let data = BookParser.readEntryData(archive, entry: self.entries[pageIndex])
-            self.lock.unlock()
+            let data = self.lock.withLock {
+                BookParser.readEntryData(archive, entry: self.entries[pageIndex])
+            }
             guard let data else { return nil }
             return VisualBookSourceFactory.decodeDownsampledImage(data: data, targetMaxDim: targetMaxDim)
         }.value
@@ -159,7 +159,7 @@ private final class EpubComicSource: VisualBookSource {
 
     init(fileURL: URL, imagePaths: [String], defaultRtl: Bool) {
         self.defaultRtl = defaultRtl
-        let arch = try? ZIPFoundation.Archive(url: fileURL, accessMode: .read)
+        let arch = try? ZIPFoundation.Archive(url: fileURL, accessMode: .read, pathEncoding: nil)
         self.archive = arch
         if let arch {
             var map: [String: ZIPFoundation.Entry] = [:]
@@ -179,9 +179,9 @@ private final class EpubComicSource: VisualBookSource {
         guard pageIndex >= 0 && pageIndex < orderedEntries.count, let archive else { return nil }
         return await Task.detached(priority: .userInitiated) { [weak self] in
             guard let self else { return nil }
-            self.lock.lock()
-            let data = BookParser.readEntryData(archive, entry: self.orderedEntries[pageIndex])
-            self.lock.unlock()
+            let data = self.lock.withLock {
+                BookParser.readEntryData(archive, entry: self.orderedEntries[pageIndex])
+            }
             guard let data else { return nil }
             return VisualBookSourceFactory.decodeDownsampledImage(data: data, targetMaxDim: targetMaxDim)
         }.value
@@ -283,9 +283,12 @@ private final class PdfVisualSource: VisualBookSource {
         guard let doc = document, pageIndex >= 0 && pageIndex < doc.pageCount else { return nil }
         return await Task.detached(priority: .userInitiated) { [weak self] in
             guard let self else { return nil }
-            self.lock.lock()
-            defer { self.lock.unlock() }
+            return self.renderPageSync(doc: doc, pageIndex: pageIndex, targetMaxDim: targetMaxDim, autoCrop: autoCrop)
+        }.value
+    }
 
+    private func renderPageSync(doc: PDFDocument, pageIndex: Int, targetMaxDim: Int, autoCrop: Bool) -> UIImage? {
+        lock.withLock {
             guard let page = doc.page(at: pageIndex) else { return nil }
             let rawBounds = page.bounds(for: .mediaBox)
             let rot = ((page.rotation % 360) + 360) % 360
@@ -339,7 +342,7 @@ private final class PdfVisualSource: VisualBookSource {
                 return fullImg
             }
             return UIImage(cgImage: croppedCG)
-        }.value
+        }
     }
 
     private static func renderFullOpaquePdfPage(page: PDFPage, targetSize: CGSize) -> UIImage? {
