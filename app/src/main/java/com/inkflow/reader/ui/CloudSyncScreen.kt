@@ -512,6 +512,25 @@ fun CloudSyncScreen(
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
                         Column(Modifier.weight(1f)) {
+                            Text("開啟與離開書本時自動同步", style = MaterialTheme.typography.bodyMedium)
+                            Text(
+                                text = "已設定雲端服務時，開書前自動抓取最新進度、按返回離開時自動同步至雲端",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = textColor.copy(alpha = 0.65f)
+                            )
+                        }
+                        Switch(
+                            checked = config.autoSyncOnBookOpenClose,
+                            onCheckedChange = { updateConfig(config.copy(autoSyncOnBookOpenClose = it)) }
+                        )
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column(Modifier.weight(1f)) {
                             Text("同步電子書／漫畫書檔本體", style = MaterialTheme.typography.bodyMedium)
                             Text(
                                 text = "關閉時僅同步書架分組、閱讀進度與書籤（最省流量）",

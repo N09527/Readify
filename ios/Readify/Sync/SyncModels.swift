@@ -59,6 +59,7 @@ struct OneDriveConfig: Equatable, Sendable {
 
 struct CloudSyncConfig: Equatable, Sendable {
     var activeProvider: CloudProviderType = .WEBDAV
+    var autoSyncOnBookOpenClose: Bool = true
     var syncBookFiles: Bool = true
     var syncReaderSettings: Bool = true
     var lastSyncTimeMs: Int64 = 0
@@ -66,6 +67,21 @@ struct CloudSyncConfig: Equatable, Sendable {
     var webDav: WebDavConfig = WebDavConfig()
     var googleDrive: GoogleDriveConfig = GoogleDriveConfig()
     var oneDrive: OneDriveConfig = OneDriveConfig()
+
+    var isActiveProviderConfigured: Bool {
+        switch activeProvider {
+        case .WEBDAV:
+            return webDav.isConfigured
+        case .GOOGLE_DRIVE:
+            return googleDrive.isAuthorized
+        case .ONEDRIVE:
+            return oneDrive.isAuthorized
+        }
+    }
+
+    var shouldAutoSync: Bool {
+        autoSyncOnBookOpenClose && isActiveProviderConfigured
+    }
 }
 
 struct RemoteFileEntry: Identifiable, Equatable, Sendable {

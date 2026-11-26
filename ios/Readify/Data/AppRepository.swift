@@ -637,12 +637,18 @@ final class AppRepository: @unchecked Sendable {
             guard book.id == bookId else { return book }
             var copy = book
             let nowRead = book.isRead || clamped >= 0.99
+            let newProgress: Float = (nowRead && clamped < 0.99) ? max(book.readingProgress, clamped) : clamped
+            let unchanged = book.hasStartedReading &&
+                book.lastChapterIndex == chapterIndex &&
+                book.lastCharOffset == charOffset &&
+                book.isRead == nowRead &&
+                abs(book.readingProgress - newProgress) < 0.0005
             copy.lastChapterIndex = chapterIndex
             copy.lastCharOffset = charOffset
-            copy.readingProgress = (nowRead && clamped < 0.99) ? max(book.readingProgress, clamped) : clamped
+            copy.readingProgress = newProgress
             copy.isRead = nowRead
             copy.hasStartedReading = true
-            copy.lastReadTime = now
+            copy.lastReadTime = unchanged ? book.lastReadTime : now
             return copy
         }
         saveBooks(updated)
@@ -655,11 +661,16 @@ final class AppRepository: @unchecked Sendable {
             guard book.id == bookId else { return book }
             var copy = book
             let nowRead = book.isRead || clamped >= 0.99
+            let newProgress: Float = (nowRead && clamped < 0.99) ? max(book.readingProgress, clamped) : clamped
+            let unchanged = book.hasStartedReading &&
+                book.lastPageIndex == pageIndex &&
+                book.isRead == nowRead &&
+                abs(book.readingProgress - newProgress) < 0.0005
             copy.lastPageIndex = pageIndex
-            copy.readingProgress = (nowRead && clamped < 0.99) ? max(book.readingProgress, clamped) : clamped
+            copy.readingProgress = newProgress
             copy.isRead = nowRead
             copy.hasStartedReading = true
-            copy.lastReadTime = now
+            copy.lastReadTime = unchanged ? book.lastReadTime : now
             return copy
         }
         saveBooks(updated)
@@ -870,6 +881,7 @@ final class AppRepository: @unchecked Sendable {
 
         return CloudSyncConfig(
             activeProvider: CloudProviderType(rawValue: (obj["activeProvider"] as? String) ?? "") ?? .WEBDAV,
+            autoSyncOnBookOpenClose: (obj["autoSyncOnBookOpenClose"] as? Bool) ?? true,
             syncBookFiles: (obj["syncBookFiles"] as? Bool) ?? true,
             syncReaderSettings: (obj["syncReaderSettings"] as? Bool) ?? true,
             lastSyncTimeMs: (obj["lastSyncTimeMs"] as? NSNumber)?.int64Value ?? 0,
@@ -907,6 +919,7 @@ final class AppRepository: @unchecked Sendable {
 
         let obj: [String: Any] = [
             "activeProvider": config.activeProvider.rawValue,
+            "autoSyncOnBookOpenClose": config.autoSyncOnBookOpenClose,
             "syncBookFiles": config.syncBookFiles,
             "syncReaderSettings": config.syncReaderSettings,
             "lastSyncTimeMs": config.lastSyncTimeMs,

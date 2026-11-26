@@ -24,6 +24,10 @@ import java.util.UUID
 
 class AppRepository(private val context: Context) {
 
+    companion object {
+        private val ioLock = Any()
+    }
+
     private val booksDir = File(context.filesDir, "books").apply { mkdirs() }
     private val coversDir = File(context.filesDir, "covers").apply { mkdirs() }
 
@@ -82,7 +86,7 @@ class AppRepository(private val context: Context) {
 
     // ---------------- Bookshelf ----------------
 
-    fun loadBooks(): List<BookItem> {
+    fun loadBooks(): List<BookItem> = synchronized(ioLock) {
         if (!booksJsonFile.exists()) return emptyList()
         return runCatching {
             val arr = JSONArray(booksJsonFile.readText())
@@ -141,7 +145,7 @@ class AppRepository(private val context: Context) {
         }.getOrDefault(emptyList())
     }
 
-    fun saveBooks(books: List<BookItem>) {
+    fun saveBooks(books: List<BookItem>) = synchronized(ioLock) {
         val arr = JSONArray()
         books.forEach { b ->
             arr.put(JSONObject().apply {
@@ -407,18 +411,25 @@ class AppRepository(private val context: Context) {
         chapterIndex: Int,
         charOffset: Int,
         progressFraction: Float
-    ) {
+    ) = synchronized(ioLock) {
         val clamped = progressFraction.coerceIn(0f, 1f)
+        val now = System.currentTimeMillis()
         val updated = loadBooks().map { book ->
             if (book.id == bookId) {
                 val nowRead = book.isRead || clamped >= 0.99f
+                val newProgress = if (nowRead && clamped < 0.99f) book.readingProgress.coerceAtLeast(clamped) else clamped
+                val unchanged = book.hasStartedReading &&
+                    book.lastChapterIndex == chapterIndex &&
+                    book.lastCharOffset == charOffset &&
+                    book.isRead == nowRead &&
+                    kotlin.math.abs(book.readingProgress - newProgress) < 0.0005f
                 book.copy(
                     lastChapterIndex = chapterIndex,
                     lastCharOffset = charOffset,
-                    readingProgress = if (nowRead && clamped < 0.99f) book.readingProgress.coerceAtLeast(clamped) else clamped,
+                    readingProgress = newProgress,
                     isRead = nowRead,
                     hasStartedReading = true,
-                    lastReadTime = System.currentTimeMillis()
+                    lastReadTime = if (unchanged) book.lastReadTime else now
                 )
             } else book
         }
@@ -429,17 +440,23 @@ class AppRepository(private val context: Context) {
         bookId: String,
         pageIndex: Int,
         progressFraction: Float
-    ) {
+    ) = synchronized(ioLock) {
         val clamped = progressFraction.coerceIn(0f, 1f)
+        val now = System.currentTimeMillis()
         val updated = loadBooks().map { book ->
             if (book.id == bookId) {
                 val nowRead = book.isRead || clamped >= 0.99f
+                val newProgress = if (nowRead && clamped < 0.99f) book.readingProgress.coerceAtLeast(clamped) else clamped
+                val unchanged = book.hasStartedReading &&
+                    book.lastPageIndex == pageIndex &&
+                    book.isRead == nowRead &&
+                    kotlin.math.abs(book.readingProgress - newProgress) < 0.0005f
                 book.copy(
                     lastPageIndex = pageIndex,
-                    readingProgress = if (nowRead && clamped < 0.99f) book.readingProgress.coerceAtLeast(clamped) else clamped,
+                    readingProgress = newProgress,
                     isRead = nowRead,
                     hasStartedReading = true,
-                    lastReadTime = System.currentTimeMillis()
+                    lastReadTime = if (unchanged) book.lastReadTime else now
                 )
             } else book
         }
@@ -644,7 +661,7 @@ class AppRepository(private val context: Context) {
 
     // ---------------- Cloud Sync Config ----------------
 
-    fun loadCloudSyncConfig(): CloudSyncConfig {
+    fun loadCloudSyncConfig(): CloudSyncConfig = synchronized(ioLock) {
         if (!cloudSyncConfigFile.exists()) return CloudSyncConfig()
         return runCatching {
             val obj = JSONObject(cloudSyncConfigFile.readText())
@@ -655,6 +672,7 @@ class AppRepository(private val context: Context) {
                 activeProvider = runCatching {
                     CloudProviderType.valueOf(obj.optString("activeProvider", CloudProviderType.WEBDAV.name))
                 }.getOrDefault(CloudProviderType.WEBDAV),
+                autoSyncOnBookOpenClose = obj.optBoolean("autoSyncOnBookOpenClose", true),
                 syncBookFiles = obj.optBoolean("syncBookFiles", true),
                 syncReaderSettings = obj.optBoolean("syncReaderSettings", true),
                 lastSyncTimeMs = obj.optLong("lastSyncTimeMs", 0L),
@@ -687,9 +705,10 @@ class AppRepository(private val context: Context) {
         }.getOrDefault(CloudSyncConfig())
     }
 
-    fun saveCloudSyncConfig(config: CloudSyncConfig) {
+    fun saveCloudSyncConfig(config: CloudSyncConfig) = synchronized(ioLock) {
         val obj = JSONObject().apply {
             put("activeProvider", config.activeProvider.name)
+            put("autoSyncOnBookOpenClose", config.autoSyncOnBookOpenClose)
             put("syncBookFiles", config.syncBookFiles)
             put("syncReaderSettings", config.syncReaderSettings)
             put("lastSyncTimeMs", config.lastSyncTimeMs)

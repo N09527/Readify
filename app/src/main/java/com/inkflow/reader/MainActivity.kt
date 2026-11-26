@@ -10,9 +10,24 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
@@ -21,6 +36,7 @@ import com.inkflow.reader.model.BatchImportResult
 import com.inkflow.reader.model.BookContentType
 import com.inkflow.reader.model.BookFormat
 import com.inkflow.reader.model.BookItem
+import com.inkflow.reader.sync.CloudSyncManager
 import com.inkflow.reader.sync.OAuthPkceHelper
 import com.inkflow.reader.ui.BookshelfScreen
 import com.inkflow.reader.ui.CloudSyncScreen
@@ -29,8 +45,11 @@ import com.inkflow.reader.ui.ReaderVolumeController
 import com.inkflow.reader.ui.VisualReaderScreen
 import com.tom_roush.pdfbox.android.PDFBoxResourceLoader
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 
 class MainActivity : ComponentActivity() {
 
@@ -60,6 +79,7 @@ class MainActivity : ComponentActivity() {
         runCatching { PDFBoxResourceLoader.init(applicationContext) }
 
         val repository = AppRepository(applicationContext)
+        val syncManager = CloudSyncManager(repository)
 
         setContent {
             val scope = rememberCoroutineScope()
@@ -67,6 +87,7 @@ class MainActivity : ComponentActivity() {
             var settings by remember { mutableStateOf(repository.loadSettings()) }
             var activeBook by remember { mutableStateOf<BookItem?>(null) }
             var showCloudSync by remember { mutableStateOf(false) }
+            var isOpeningBook by remember { mutableStateOf(false) }
             var isImporting by remember { mutableStateOf(false) }
             var importStatus by remember { mutableStateOf<String?>(null) }
 
@@ -153,6 +174,39 @@ class MainActivity : ComponentActivity() {
                 }
             }
 
+            val handleExitReader: () -> Unit = {
+                if (activeBook != null) {
+                    books = repository.loadBooks()
+                    activeBook = null
+                    val syncCfg = repository.loadCloudSyncConfig()
+                    if (syncCfg.shouldAutoSync) {
+                        scope.launch {
+                            if (!isImporting) {
+                                importStatus = "正在自動同步閱讀進度至雲端…"
+                            }
+                            val res = syncManager.syncNow(
+                                config = syncCfg,
+                                onConfigUpdated = {},
+                                onProgress = {}
+                            )
+                            books = repository.loadBooks()
+                            settings = repository.loadSettings()
+                            if (!isImporting) {
+                                val doneMsg = res.fold(
+                                    onSuccess = { "已自動同步閱讀進度（${syncCfg.activeProvider.label}）" },
+                                    onFailure = { "自動同步暫時略過：${it.message}" }
+                                )
+                                importStatus = doneMsg
+                                delay(3_500L)
+                                if (importStatus == doneMsg) {
+                                    importStatus = null
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
             MaterialTheme(colorScheme = lightColorScheme()) {
                 val current = activeBook
                 when {
@@ -185,10 +239,36 @@ class MainActivity : ComponentActivity() {
                             onImportFilesClick = { importFilesLauncher.launch(arrayOf("*/*")) },
                             onImportFolderClick = { importFolderLauncher.launch(null) },
                             onOpenBook = { book ->
-                                scope.launch {
-                                    val resolved = repository.refreshContentTypeIfNeeded(book)
-                                    if (resolved != book) books = repository.loadBooks()
-                                    activeBook = resolved
+                                if (!isOpeningBook) {
+                                    scope.launch {
+                                        val syncCfg = repository.loadCloudSyncConfig()
+                                        var targetBook = book
+                                        if (syncCfg.shouldAutoSync) {
+                                            isOpeningBook = true
+                                            val syncJob = scope.async {
+                                                syncManager.syncNow(
+                                                    config = syncCfg,
+                                                    syncBookFilesOverride = false,
+                                                    onConfigUpdated = {},
+                                                    onProgress = {}
+                                                )
+                                            }
+                                            withTimeoutOrNull(8_000L) {
+                                                syncJob.await()
+                                            }
+                                            val latestBooks = repository.loadBooks()
+                                            books = latestBooks
+                                            settings = repository.loadSettings()
+                                            targetBook = latestBooks.firstOrNull { it.id == book.id }
+                                                ?: latestBooks.firstOrNull { book.contentHash.isNotBlank() && it.contentHash == book.contentHash }
+                                                ?: latestBooks.firstOrNull { it.localPath == book.localPath }
+                                                ?: book
+                                            isOpeningBook = false
+                                        }
+                                        val resolved = repository.refreshContentTypeIfNeeded(targetBook)
+                                        if (resolved != targetBook) books = repository.loadBooks()
+                                        activeBook = resolved
+                                    }
                                 }
                             },
                             onDeleteBook = { book ->
@@ -257,6 +337,40 @@ class MainActivity : ComponentActivity() {
                                 showCloudSync = true
                             }
                         )
+
+                        if (isOpeningBook) {
+                            Dialog(
+                                onDismissRequest = {},
+                                properties = DialogProperties(
+                                    dismissOnBackPress = false,
+                                    dismissOnClickOutside = false
+                                )
+                            ) {
+                                Surface(
+                                    shape = RoundedCornerShape(14.dp),
+                                    color = if (settings.eInkMode) Color.White else MaterialTheme.colorScheme.surface,
+                                    border = if (settings.eInkMode) BorderStroke(1.5.dp, Color.Black) else null,
+                                    tonalElevation = if (settings.eInkMode) 0.dp else 6.dp
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 20.dp, vertical = 18.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(14.dp)
+                                    ) {
+                                        CircularProgressIndicator(
+                                            modifier = Modifier.size(24.dp),
+                                            strokeWidth = 2.6.dp,
+                                            color = if (settings.eInkMode) Color.Black else MaterialTheme.colorScheme.primary
+                                        )
+                                        Text(
+                                            text = "正在同步雲端最新閱讀進度…",
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            color = if (settings.eInkMode) Color.Black else MaterialTheme.colorScheme.onSurface
+                                        )
+                                    }
+                                }
+                            }
+                        }
                     }
 
                     else -> {
@@ -283,10 +397,7 @@ class MainActivity : ComponentActivity() {
                                         repository.saveSettings(updated)
                                     }
                                 } else null,
-                                onExitReader = {
-                                    books = repository.loadBooks()
-                                    activeBook = null
-                                }
+                                onExitReader = handleExitReader
                             )
                         } else {
                             ReaderScreen(
@@ -308,10 +419,7 @@ class MainActivity : ComponentActivity() {
                                         repository.saveSettings(updated)
                                     }
                                 } else null,
-                                onExitReader = {
-                                    books = repository.loadBooks()
-                                    activeBook = null
-                                }
+                                onExitReader = handleExitReader
                             )
                         }
                     }

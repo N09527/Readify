@@ -44,6 +44,7 @@ data class OneDriveConfig(
 
 data class CloudSyncConfig(
     val activeProvider: CloudProviderType = CloudProviderType.WEBDAV,
+    val autoSyncOnBookOpenClose: Boolean = true,
     val syncBookFiles: Boolean = true,
     val syncReaderSettings: Boolean = true,
     val lastSyncTimeMs: Long = 0L,
@@ -51,7 +52,17 @@ data class CloudSyncConfig(
     val webDav: WebDavConfig = WebDavConfig(),
     val googleDrive: GoogleDriveConfig = GoogleDriveConfig(),
     val oneDrive: OneDriveConfig = OneDriveConfig()
-)
+) {
+    val isActiveProviderConfigured: Boolean
+        get() = when (activeProvider) {
+            CloudProviderType.WEBDAV -> webDav.isConfigured
+            CloudProviderType.GOOGLE_DRIVE -> googleDrive.isAuthorized
+            CloudProviderType.ONEDRIVE -> oneDrive.isAuthorized
+        }
+
+    val shouldAutoSync: Boolean
+        get() = autoSyncOnBookOpenClose && isActiveProviderConfigured
+}
 
 data class RemoteFileEntry(
     val name: String,
