@@ -4,6 +4,8 @@ import com.inkflow.reader.data.AppRepository
 import com.inkflow.reader.model.*
 import com.inkflow.reader.parser.BookParser
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
@@ -14,6 +16,7 @@ class CloudSyncManager(private val repository: AppRepository) {
     companion object {
         private const val STATE_FILE = "sync_state.json"
         private const val BOOKS_SUBFOLDER = "books"
+        private val syncMutex = Mutex()
     }
 
     fun createClient(
@@ -64,131 +67,134 @@ class CloudSyncManager(private val repository: AppRepository) {
      *  2. Downloads remote sync_state.json (if present).
      *  3. Matches local & remote books by id, fast contentHash, or (sourceFileName + size).
      *  4. Merges reading progress (latest lastReadTime wins) & multi-tags.
-     *  5. If syncBookFiles is enabled, uploads missing local books & downloads missing remote books.
+     *  5. If effectiveSyncBookFiles is enabled, uploads missing local books & downloads missing remote books.
      *  6. Merges bookmarks (union minus merged deletedBookmarkIds tombstones).
      *  7. Optionally merges ReaderSettings (latest settingsUpdatedAtMs wins, preserving local font paths).
      *  8. Saves merged state locally and uploads updated sync_state.json to cloud.
      */
     suspend fun syncNow(
         config: CloudSyncConfig,
+        syncBookFilesOverride: Boolean? = null,
         onConfigUpdated: (CloudSyncConfig) -> Unit,
         onProgress: suspend (String) -> Unit
     ): Result<SyncReport> = withContext(Dispatchers.IO) {
-        runCatching {
-            val client = createClient(config, onConfigUpdated)
-            val errors = mutableListOf<String>()
-            var uploadedBooks = 0
-            var downloadedBooks = 0
+        syncMutex.withLock {
+            runCatching {
+                val effectiveSyncBookFiles = syncBookFilesOverride ?: config.syncBookFiles
+                val client = createClient(config, onConfigUpdated)
+                val errors = mutableListOf<String>()
+                var uploadedBooks = 0
+                var downloadedBooks = 0
 
-            onProgress("正在連線 ${config.activeProvider.label} 並檢查同步目錄…")
-            client.ensureRootFolder().getOrThrow()
+                onProgress("正在連線 ${config.activeProvider.label} 並檢查同步目錄…")
+                client.ensureRootFolder().getOrThrow()
 
-            // Ensure all local books have a contentHash computed before matching
-            onProgress("正在掃描本機書架與計算書籍指紋…")
-            val localBooks = repository.loadBooks().map { book ->
-                val f = File(book.localPath)
-                if (book.contentHash.isBlank() && f.exists()) {
-                    book.copy(
-                        contentHash = repository.computeFastFingerprint(f),
-                        fileSizeBytes = if (book.fileSizeBytes > 0L) book.fileSizeBytes else f.length()
-                    )
-                } else book
-            }.toMutableList()
-
-            val localBookmarks = repository.loadAllBookmarksPublic()
-            val localDeletedBookmarks = repository.loadDeletedBookmarkIds()
-            val localSettings = repository.loadSettings()
-            val localSettingsUpdatedAt = repository.loadSettingsUpdatedAtMs()
-
-            onProgress("正在下載雲端同步紀錄 ($STATE_FILE)…")
-            val remoteStateBytes = client.downloadBytes(STATE_FILE).getOrThrow()
-            val remoteJson = remoteStateBytes?.let { bytes ->
-                runCatching { JSONObject(String(bytes, Charsets.UTF_8)) }.getOrNull()
-            }
-
-            val remoteBooks = parseRemoteBooks(remoteJson)
-            val remoteBookmarks = parseRemoteBookmarks(remoteJson)
-            val remoteDeletedBookmarks = parseRemoteStringSet(remoteJson, "deletedBookmarkIds")
-            val remoteSettingsUpdatedAt = remoteJson?.optLong("settingsUpdatedAtMs", 0L) ?: 0L
-            val remoteSettingsObj = remoteJson?.optJSONObject("settings")
-
-            // Query existing files in remote books/ folder to avoid redundant uploads
-            val existingRemoteBookFiles: Set<String> = if (config.syncBookFiles) {
-                onProgress("正在比對雲端書檔清單…")
-                client.listFiles(BOOKS_SUBFOLDER).getOrDefault(emptyList())
-                    .filterNot { it.isDirectory }
-                    .map { it.name }
-                    .toSet()
-            } else emptySet()
-
-            // Map old local book ID -> canonical synced book ID (for remapping bookmarks if two devices imported same file separately)
-            val bookIdRemap = mutableMapOf<String, String>()
-            val mergedBooks = mutableListOf<BookItem>()
-            val matchedRemoteIds = mutableSetOf<String>()
-
-            // Step A: Reconcile all local books against remote records
-            for (local in localBooks) {
-                val remoteMatch = findMatchingRemoteBook(local, remoteBooks, matchedRemoteIds)
-                if (remoteMatch != null) {
-                    matchedRemoteIds.add(remoteMatch.id)
-                    val canonicalId = remoteMatch.id
-                    if (local.id != canonicalId) {
-                        bookIdRemap[local.id] = canonicalId
-                    }
-                    val merged = if (remoteMatch.lastReadTime > local.lastReadTime) {
-                        local.copy(
-                            id = canonicalId,
-                            tags = if (remoteMatch.tags.isNotEmpty()) remoteMatch.tags else local.tags,
-                            lastChapterIndex = remoteMatch.lastChapterIndex,
-                            lastCharOffset = remoteMatch.lastCharOffset,
-                            lastPageIndex = remoteMatch.lastPageIndex,
-                            lastReadTime = remoteMatch.lastReadTime,
-                            contentType = remoteMatch.contentType,
-                            readingProgress = remoteMatch.readingProgress,
-                            isRead = remoteMatch.isRead,
-                            hasStartedReading = remoteMatch.hasStartedReading
+                // Ensure all local books have a contentHash computed before matching
+                onProgress("正在掃描本機書架與計算書籍指紋…")
+                val localBooks = repository.loadBooks().map { book ->
+                    val f = File(book.localPath)
+                    if (book.contentHash.isBlank() && f.exists()) {
+                        book.copy(
+                            contentHash = repository.computeFastFingerprint(f),
+                            fileSizeBytes = if (book.fileSizeBytes > 0L) book.fileSizeBytes else f.length()
                         )
-                    } else {
-                        local.copy(id = canonicalId)
-                    }
-                    mergedBooks.add(merged)
+                    } else book
+                }.toMutableList()
 
-                    if (config.syncBookFiles) {
-                        val remoteFileName = buildRemoteBookFileName(merged)
-                        if (remoteFileName !in existingRemoteBookFiles) {
-                            val localFile = File(merged.localPath)
-                            if (localFile.exists()) {
-                                onProgress("正在上傳書檔：${merged.title}…")
-                                client.uploadFile("$BOOKS_SUBFOLDER/$remoteFileName", localFile)
-                                    .onSuccess { uploadedBooks++ }
-                                    .onFailure { errors.add("上傳「${merged.title}」失敗：${it.message}") }
+                val localBookmarks = repository.loadAllBookmarksPublic()
+                val localDeletedBookmarks = repository.loadDeletedBookmarkIds()
+                val localSettings = repository.loadSettings()
+                val localSettingsUpdatedAt = repository.loadSettingsUpdatedAtMs()
+
+                onProgress("正在下載雲端同步紀錄 ($STATE_FILE)…")
+                val remoteStateBytes = client.downloadBytes(STATE_FILE).getOrThrow()
+                val remoteJson = remoteStateBytes?.let { bytes ->
+                    runCatching { JSONObject(String(bytes, Charsets.UTF_8)) }.getOrNull()
+                }
+
+                val remoteBooks = parseRemoteBooks(remoteJson)
+                val remoteBookmarks = parseRemoteBookmarks(remoteJson)
+                val remoteDeletedBookmarks = parseRemoteStringSet(remoteJson, "deletedBookmarkIds")
+                val remoteSettingsUpdatedAt = remoteJson?.optLong("settingsUpdatedAtMs", 0L) ?: 0L
+                val remoteSettingsObj = remoteJson?.optJSONObject("settings")
+
+                // Query existing files in remote books/ folder to avoid redundant uploads
+                val existingRemoteBookFiles: Set<String> = if (effectiveSyncBookFiles) {
+                    onProgress("正在比對雲端書檔清單…")
+                    client.listFiles(BOOKS_SUBFOLDER).getOrDefault(emptyList())
+                        .filterNot { it.isDirectory }
+                        .map { it.name }
+                        .toSet()
+                } else emptySet()
+
+                // Map old local book ID -> canonical synced book ID (for remapping bookmarks if two devices imported same file separately)
+                val bookIdRemap = mutableMapOf<String, String>()
+                val mergedBooks = mutableListOf<BookItem>()
+                val matchedRemoteIds = mutableSetOf<String>()
+
+                // Step A: Reconcile all local books against remote records
+                for (local in localBooks) {
+                    val remoteMatch = findMatchingRemoteBook(local, remoteBooks, matchedRemoteIds)
+                    if (remoteMatch != null) {
+                        matchedRemoteIds.add(remoteMatch.id)
+                        val canonicalId = remoteMatch.id
+                        if (local.id != canonicalId) {
+                            bookIdRemap[local.id] = canonicalId
+                        }
+                        val merged = if (remoteMatch.lastReadTime > local.lastReadTime) {
+                            local.copy(
+                                id = canonicalId,
+                                tags = if (remoteMatch.tags.isNotEmpty()) remoteMatch.tags else local.tags,
+                                lastChapterIndex = remoteMatch.lastChapterIndex,
+                                lastCharOffset = remoteMatch.lastCharOffset,
+                                lastPageIndex = remoteMatch.lastPageIndex,
+                                lastReadTime = remoteMatch.lastReadTime,
+                                contentType = remoteMatch.contentType,
+                                readingProgress = remoteMatch.readingProgress,
+                                isRead = remoteMatch.isRead,
+                                hasStartedReading = remoteMatch.hasStartedReading
+                            )
+                        } else {
+                            local.copy(id = canonicalId)
+                        }
+                        mergedBooks.add(merged)
+
+                        if (effectiveSyncBookFiles) {
+                            val remoteFileName = buildRemoteBookFileName(merged)
+                            if (remoteFileName !in existingRemoteBookFiles) {
+                                val localFile = File(merged.localPath)
+                                if (localFile.exists()) {
+                                    onProgress("正在上傳書檔：${merged.title}…")
+                                    client.uploadFile("$BOOKS_SUBFOLDER/$remoteFileName", localFile)
+                                        .onSuccess { uploadedBooks++ }
+                                        .onFailure { errors.add("上傳「${merged.title}」失敗：${it.message}") }
+                                }
                             }
                         }
-                    }
-                } else {
-                    // Local-only book -> keep locally & upload to cloud if enabled
-                    mergedBooks.add(local)
-                    if (config.syncBookFiles) {
-                        val remoteFileName = buildRemoteBookFileName(local)
-                        if (remoteFileName !in existingRemoteBookFiles) {
-                            val localFile = File(local.localPath)
-                            if (localFile.exists()) {
-                                onProgress("正在上傳書檔：${local.title}…")
-                                client.uploadFile("$BOOKS_SUBFOLDER/$remoteFileName", localFile)
-                                    .onSuccess { uploadedBooks++ }
-                                    .onFailure { errors.add("上傳「${local.title}」失敗：${it.message}") }
+                    } else {
+                        // Local-only book -> keep locally & upload to cloud if enabled
+                        mergedBooks.add(local)
+                        if (effectiveSyncBookFiles) {
+                            val remoteFileName = buildRemoteBookFileName(local)
+                            if (remoteFileName !in existingRemoteBookFiles) {
+                                val localFile = File(local.localPath)
+                                if (localFile.exists()) {
+                                    onProgress("正在上傳書檔：${local.title}…")
+                                    client.uploadFile("$BOOKS_SUBFOLDER/$remoteFileName", localFile)
+                                        .onSuccess { uploadedBooks++ }
+                                        .onFailure { errors.add("上傳「${local.title}」失敗：${it.message}") }
+                                }
                             }
                         }
                     }
                 }
-            }
 
-            // Step B: Download remote-only books (if syncBookFiles is enabled)
-            val unmatchedRemoteBooks = remoteBooks.filter { it.id !in matchedRemoteIds }
-            val preservedRemoteOnlyRecords = mutableListOf<RemoteBookRecord>()
+                // Step B: Download remote-only books (if effectiveSyncBookFiles is enabled)
+                val unmatchedRemoteBooks = remoteBooks.filter { it.id !in matchedRemoteIds }
+                val preservedRemoteOnlyRecords = mutableListOf<RemoteBookRecord>()
 
-            for (remote in unmatchedRemoteBooks) {
-                if (config.syncBookFiles) {
+                for (remote in unmatchedRemoteBooks) {
+                    if (effectiveSyncBookFiles) {
                     val remoteFileName = remote.remoteFileName.ifBlank {
                         "${remote.id}.${remote.ext.ifBlank { remote.format.name.lowercase() }}"
                     }
@@ -311,6 +317,7 @@ class CloudSyncManager(private val repository: AppRepository) {
             onConfigUpdated(refreshedCfg)
 
             report
+            }
         }
     }
 

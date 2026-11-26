@@ -28,6 +28,7 @@ struct VisualReaderScreen: View {
     @State private var showSettingsSheet = false
     @State private var showTapZoneSheet = false
     @State private var toastMessage: String?
+    @State private var hasExited = false
 
     private var isPdf: Bool { book.format == .PDF }
     private var isRtlFlow: Bool { isPdf ? false : settings.comicRtl }
@@ -124,7 +125,7 @@ struct VisualReaderScreen: View {
                     VStack(spacing: 12) {
                         Text("此檔案內找不到可顯示的圖片或頁面")
                             .foregroundStyle(settings.eInkMode ? .black : .white)
-                        Button("返回書架", action: onExitReader)
+                        Button("返回書架", action: exitReaderSafely)
                             .buttonStyle(.borderedProminent)
                     }
                 }
@@ -207,7 +208,7 @@ struct VisualReaderScreen: View {
         return VStack {
             VStack(spacing: 6) {
                 HStack(spacing: 8) {
-                    Button(action: onExitReader) {
+                    Button(action: exitReaderSafely) {
                         Image(systemName: "chevron.left")
                             .font(.title3.weight(.semibold))
                             .foregroundStyle(barFg)
@@ -408,7 +409,16 @@ struct VisualReaderScreen: View {
         }
     }
 
-    private func persistVisualProgress() {
+    private func exitReaderSafely() {
+        guard !hasExited else { return }
+        hasExited = true
+        if !isLoading && totalPages > 0 {
+            persistVisualProgress(synchronous: true)
+        }
+        onExitReader()
+    }
+
+    private func persistVisualProgress(synchronous: Bool = false) {
         guard totalPages > 0 else { return }
         let step = isDualPage ? 2 : 1
         let reached = min(totalPages, currentPageIndex + step)
@@ -418,8 +428,12 @@ struct VisualReaderScreen: View {
         let bookId = book.id
         let pg = currentPageIndex
         let repo = repository
-        Task.detached(priority: .utility) {
+        if synchronous {
             repo.updateVisualBookProgress(bookId: bookId, pageIndex: pg, progressFraction: fraction)
+        } else {
+            Task.detached(priority: .utility) {
+                repo.updateVisualBookProgress(bookId: bookId, pageIndex: pg, progressFraction: fraction)
+            }
         }
     }
 

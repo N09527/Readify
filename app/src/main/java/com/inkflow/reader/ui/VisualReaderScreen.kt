@@ -67,12 +67,30 @@ fun VisualReaderScreen(
 
     var canvasViewRef by remember { mutableStateOf<VisualPageCanvasView?>(null) }
 
-    // System Back button inside comic/PDF reader returns to Bookshelf instead of exiting the app
+    var hasExited by remember(book.id) { mutableStateOf(false) }
+
+    fun exitReaderSafely() {
+        if (hasExited) return
+        hasExited = true
+        if (!isLoading && totalPages > 0) {
+            val step = if (isDualPage) 2 else 1
+            val reachedPageCount = (currentPageIndex + step).coerceAtMost(totalPages)
+            val progressFraction = if (reachedPageCount >= totalPages) {
+                1f
+            } else {
+                (reachedPageCount.toFloat() / totalPages.toFloat()).coerceIn(0f, 1f)
+            }
+            repository.updateVisualBookProgress(book.id, currentPageIndex, progressFraction)
+        }
+        onExitReader()
+    }
+
+    // System Back button & Android gesture swipe-back inside comic/PDF reader flush progress & return to Bookshelf
     BackHandler {
         when {
             showTapZoneDialog -> showTapZoneDialog = false
             showSettingsSheet -> showSettingsSheet = false
-            else -> onExitReader()
+            else -> exitReaderSafely()
         }
     }
 
@@ -295,7 +313,7 @@ fun VisualReaderScreen(
                         color = if (settings.eInkMode) Color.Black else Color.White
                     )
                     Spacer(Modifier.height(12.dp))
-                    Button(onClick = onExitReader) { Text("返回書架") }
+                    Button(onClick = { exitReaderSafely() }) { Text("返回書架") }
                 }
             }
         }
@@ -341,7 +359,7 @@ fun VisualReaderScreen(
                             .padding(horizontal = 4.dp, vertical = 6.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        IconButton(onClick = onExitReader) {
+                        IconButton(onClick = { exitReaderSafely() }) {
                             Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回書架", tint = barFg)
                         }
                         Column(Modifier.weight(1f)) {

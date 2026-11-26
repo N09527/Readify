@@ -122,17 +122,6 @@ fun ReaderScreen(
 
     var canvasViewRef by remember { mutableStateOf<ReaderCanvasView?>(null) }
 
-    // System Back button inside reader returns to Bookshelf instead of exiting the app
-    BackHandler {
-        when {
-            showTapZoneDialog -> showTapZoneDialog = false
-            showSearchDialog -> showSearchDialog = false
-            showSettingsSheet -> showSettingsSheet = false
-            showTocAndBookmarks -> showTocAndBookmarks = false
-            else -> onExitReader()
-        }
-    }
-
     LaunchedEffect(showSettingsSheet, settings.customFontFolderUri, fontScanVersion) {
         hasAllFilesPermission = FontManager.hasAllFilesAccess()
         if (showSettingsSheet || availableFonts.isEmpty()) {
@@ -245,10 +234,8 @@ fun ReaderScreen(
         prefix
     }
 
-    LaunchedEffect(currentChapterIndex, currentPageIndex, pages, isDualPage, chapterPrefixChars) {
-        val page = pages.getOrNull(currentPageIndex) ?: return@LaunchedEffect
-        targetCharOffset = page.startOffset
-
+    fun computeCurrentProgress(): Pair<Int, Float>? {
+        val page = pages.getOrNull(currentPageIndex) ?: return null
         val totalBookChars = chapterPrefixChars.lastOrNull()?.coerceAtLeast(1L) ?: 1L
         val step = if (isDualPage) 2 else 1
         val isAtFinalSpread = rawChapters.isNotEmpty() &&
@@ -264,9 +251,39 @@ fun ReaderScreen(
                 pages.size.coerceAtLeast(1).toFloat()
             ((prevChars + curChChars * chPageRatio) / totalBookChars.toFloat()).coerceIn(0f, 1f)
         }
+        return page.startOffset to progressFraction
+    }
+
+    var hasExited by remember(book.id) { mutableStateOf(false) }
+
+    fun exitReaderSafely() {
+        if (hasExited) return
+        hasExited = true
+        if (!isLoading) {
+            computeCurrentProgress()?.let { (charOffset, progressFraction) ->
+                repository.updateBookProgress(book.id, currentChapterIndex, charOffset, progressFraction)
+            }
+        }
+        onExitReader()
+    }
+
+    // System Back button & Android gesture swipe-back inside reader flush progress & return to Bookshelf
+    BackHandler {
+        when {
+            showTapZoneDialog -> showTapZoneDialog = false
+            showSearchDialog -> showSearchDialog = false
+            showSettingsSheet -> showSettingsSheet = false
+            showTocAndBookmarks -> showTocAndBookmarks = false
+            else -> exitReaderSafely()
+        }
+    }
+
+    LaunchedEffect(currentChapterIndex, currentPageIndex, pages, isDualPage, chapterPrefixChars) {
+        val (charOffset, progressFraction) = computeCurrentProgress() ?: return@LaunchedEffect
+        targetCharOffset = charOffset
 
         withContext(Dispatchers.IO) {
-            repository.updateBookProgress(book.id, currentChapterIndex, page.startOffset, progressFraction)
+            repository.updateBookProgress(book.id, currentChapterIndex, charOffset, progressFraction)
         }
     }
 
@@ -508,7 +525,7 @@ fun ReaderScreen(
                             .padding(horizontal = 4.dp, vertical = 6.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        IconButton(onClick = onExitReader) {
+                        IconButton(onClick = { exitReaderSafely() }) {
                             Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回書架", tint = barFg)
                         }
                         Column(Modifier.weight(1f)) {

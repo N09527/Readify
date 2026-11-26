@@ -466,6 +466,20 @@ struct CloudSyncScreen: View {
                 .foregroundStyle(fgColor)
 
             Toggle(isOn: Binding(
+                get: { config.autoSyncOnBookOpenClose },
+                set: { val in var c = config; c.autoSyncOnBookOpenClose = val; updateConfig(c) }
+            )) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("開啟與離開書本時自動同步")
+                        .font(.subheadline)
+                        .foregroundStyle(fgColor)
+                    Text("已設定雲端服務時，開書前自動抓取最新進度、按返回離開時自動同步至雲端")
+                        .font(.caption2)
+                        .foregroundStyle(fgColor.opacity(0.65))
+                }
+            }
+
+            Toggle(isOn: Binding(
                 get: { config.syncBookFiles },
                 set: { val in var c = config; c.syncBookFiles = val; updateConfig(c) }
             )) {

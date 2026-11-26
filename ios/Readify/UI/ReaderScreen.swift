@@ -42,6 +42,7 @@ struct ReaderScreen: View {
 
     @State private var availableFonts: [LocalFontItem] = []
     @State private var isScanningFonts = false
+    @State private var hasExited = false
 
     private var layoutMetrics: SpreadLayoutMetrics? {
         guard viewportWidthPt > 10 && viewportHeightPt > 10 else { return nil }
@@ -341,7 +342,7 @@ struct ReaderScreen: View {
             // Top Bar
             VStack(spacing: 6) {
                 HStack(spacing: 8) {
-                    Button(action: onExitReader) {
+                    Button(action: exitReaderSafely) {
                         Image(systemName: "chevron.left")
                             .font(.title3.weight(.semibold))
                             .foregroundStyle(barFg)
@@ -685,7 +686,16 @@ struct ReaderScreen: View {
         }
     }
 
-    private func persistReadingProgress() {
+    private func exitReaderSafely() {
+        guard !hasExited else { return }
+        hasExited = true
+        if !isLoading {
+            persistReadingProgress(synchronous: true)
+        }
+        onExitReader()
+    }
+
+    private func persistReadingProgress(synchronous: Bool = false) {
         guard currentPageIndex >= 0 && currentPageIndex < pages.count else { return }
         let page = pages[currentPageIndex]
         targetCharOffset = page.startOffset
@@ -711,8 +721,12 @@ struct ReaderScreen: View {
         let ch = currentChapterIndex
         let off = page.startOffset
         let repo = repository
-        Task.detached(priority: .utility) {
+        if synchronous {
             repo.updateBookProgress(bookId: bookId, chapterIndex: ch, charOffset: off, progressFraction: progressFraction)
+        } else {
+            Task.detached(priority: .utility) {
+                repo.updateBookProgress(bookId: bookId, chapterIndex: ch, charOffset: off, progressFraction: progressFraction)
+            }
         }
     }
 

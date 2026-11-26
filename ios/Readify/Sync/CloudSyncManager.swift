@@ -1,5 +1,30 @@
 import Foundation
 
+private actor CloudSyncGate {
+    static let shared = CloudSyncGate()
+    private var isLocked = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    func acquire() async {
+        if !isLocked {
+            isLocked = true
+            return
+        }
+        await withCheckedContinuation { continuation in
+            waiters.append(continuation)
+        }
+    }
+
+    func release() {
+        if !waiters.isEmpty {
+            let next = waiters.removeFirst()
+            next.resume()
+        } else {
+            isLocked = false
+        }
+    }
+}
+
 final class CloudSyncManager {
     private static let stateFile = "sync_state.json"
     private static let booksSubfolder = "books"
@@ -62,9 +87,33 @@ final class CloudSyncManager {
 
     func syncNow(
         config: CloudSyncConfig,
+        syncBookFilesOverride: Bool? = nil,
         onConfigUpdated: @escaping @Sendable (CloudSyncConfig) -> Void,
         onProgress: @escaping @Sendable (String) async -> Void
     ) async throws -> SyncReport {
+        await CloudSyncGate.shared.acquire()
+        do {
+            let report = try await performSyncNow(
+                config: config,
+                syncBookFilesOverride: syncBookFilesOverride,
+                onConfigUpdated: onConfigUpdated,
+                onProgress: onProgress
+            )
+            await CloudSyncGate.shared.release()
+            return report
+        } catch {
+            await CloudSyncGate.shared.release()
+            throw error
+        }
+    }
+
+    private func performSyncNow(
+        config: CloudSyncConfig,
+        syncBookFilesOverride: Bool?,
+        onConfigUpdated: @escaping @Sendable (CloudSyncConfig) -> Void,
+        onProgress: @escaping @Sendable (String) async -> Void
+    ) async throws -> SyncReport {
+        let effectiveSyncBookFiles = syncBookFilesOverride ?? config.syncBookFiles
         let client = createClient(config: config, onConfigUpdated: onConfigUpdated)
         var errors: [String] = []
         var uploadedBooks = 0
@@ -108,7 +157,7 @@ final class CloudSyncManager {
         let remoteSettingsObj = remoteJson?["settings"] as? [String: Any]
 
         var remoteBookFileSet: Set<String> = []
-        if config.syncBookFiles {
+        if effectiveSyncBookFiles {
             await onProgress("正在比對雲端書檔清單…")
             let listed = (try? await client.listFiles(subFolder: Self.booksSubfolder)) ?? []
             remoteBookFileSet = Set(listed.filter { !$0.isDirectory }.map { $0.name })
@@ -141,7 +190,7 @@ final class CloudSyncManager {
                 }
                 mergedBooks.append(merged)
 
-                if config.syncBookFiles {
+                if effectiveSyncBookFiles {
                     let remoteFileName = buildRemoteBookFileName(merged)
                     if !remoteBookFileSet.contains(remoteFileName) {
                         let localURL = repository.resolveBookFileURL(local)
@@ -162,7 +211,7 @@ final class CloudSyncManager {
                 }
             } else {
                 mergedBooks.append(local)
-                if config.syncBookFiles {
+                if effectiveSyncBookFiles {
                     let remoteFileName = buildRemoteBookFileName(local)
                     if !remoteBookFileSet.contains(remoteFileName) {
                         let localURL = repository.resolveBookFileURL(local)
@@ -184,12 +233,12 @@ final class CloudSyncManager {
             }
         }
 
-        // Step B: Download remote-only books (if syncBookFiles is enabled)
+        // Step B: Download remote-only books (if effectiveSyncBookFiles is enabled)
         let unmatchedRemoteBooks = remoteBooks.filter { !matchedRemoteIds.contains($0.id) }
         var preservedRemoteOnlyRecords: [RemoteBookRecord] = []
 
         for remote in unmatchedRemoteBooks {
-            if config.syncBookFiles {
+            if effectiveSyncBookFiles {
                 let safeExt = remote.ext.isEmpty ? remote.format.rawValue.lowercased() : remote.ext
                 let remoteFileName = remote.remoteFileName.isEmpty ? "\(remote.id).\(safeExt)" : remote.remoteFileName
                 let relBookPath = "Books/\(remote.id).\(safeExt)"
