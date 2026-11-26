@@ -12,8 +12,8 @@ android {
         applicationId = "com.inkflow.reader"
         minSdk = 33
         targetSdk = 36
-        versionCode = 15
-        versionName = "1.1.5-readify"
+        versionCode = 16
+        versionName = "1.1.6-readify"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }

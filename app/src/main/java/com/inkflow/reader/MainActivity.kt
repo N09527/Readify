@@ -380,47 +380,49 @@ class MainActivity : ComponentActivity() {
                             BookContentType.TEXT -> false
                         }
 
-                        if (useVisualReader) {
-                            VisualReaderScreen(
-                                book = current,
-                                repository = repository,
-                                settings = settings,
-                                volumeController = volumeController,
-                                onSettingsChange = { updated ->
-                                    settings = updated
-                                    repository.saveSettings(updated)
-                                },
-                                onSwitchToPdfReflow = if (current.format == BookFormat.PDF) {
-                                    {
-                                        val updated = settings.copy(pdfReflowMode = true)
+                        key(current.id) {
+                            if (useVisualReader) {
+                                VisualReaderScreen(
+                                    book = current,
+                                    repository = repository,
+                                    settings = settings,
+                                    volumeController = volumeController,
+                                    onSettingsChange = { updated ->
                                         settings = updated
                                         repository.saveSettings(updated)
-                                    }
-                                } else null,
-                                onExitReader = handleExitReader
-                            )
-                        } else {
-                            ReaderScreen(
-                                book = current,
-                                repository = repository,
-                                settings = settings,
-                                fontScanVersion = fontScanVersion.intValue,
-                                volumeController = volumeController,
-                                onSettingsChange = { updated ->
-                                    settings = updated
-                                    repository.saveSettings(updated)
-                                },
-                                onRequestAllFilesAccess = { openAllFilesAccessSettings() },
-                                onPickFontsFolder = { pickFontsFolderLauncher.launch(null) },
-                                onSwitchBackToPdfOriginal = if (current.format == BookFormat.PDF) {
-                                    {
-                                        val updated = settings.copy(pdfReflowMode = false)
+                                    },
+                                    onSwitchToPdfReflow = if (current.format == BookFormat.PDF) {
+                                        {
+                                            val updated = settings.copy(pdfReflowMode = true)
+                                            settings = updated
+                                            repository.saveSettings(updated)
+                                        }
+                                    } else null,
+                                    onExitReader = handleExitReader
+                                )
+                            } else {
+                                ReaderScreen(
+                                    book = current,
+                                    repository = repository,
+                                    settings = settings,
+                                    fontScanVersion = fontScanVersion.intValue,
+                                    volumeController = volumeController,
+                                    onSettingsChange = { updated ->
                                         settings = updated
                                         repository.saveSettings(updated)
-                                    }
-                                } else null,
-                                onExitReader = handleExitReader
-                            )
+                                    },
+                                    onRequestAllFilesAccess = { openAllFilesAccessSettings() },
+                                    onPickFontsFolder = { pickFontsFolderLauncher.launch(null) },
+                                    onSwitchBackToPdfOriginal = if (current.format == BookFormat.PDF) {
+                                        {
+                                            val updated = settings.copy(pdfReflowMode = false)
+                                            settings = updated
+                                            repository.saveSettings(updated)
+                                        }
+                                    } else null,
+                                    onExitReader = handleExitReader
+                                )
+                            }
                         }
                     }
                 }

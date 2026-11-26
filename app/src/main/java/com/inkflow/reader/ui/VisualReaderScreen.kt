@@ -48,19 +48,19 @@ fun VisualReaderScreen(
 ) {
     val context = LocalContext.current
 
-    var source by remember { mutableStateOf<VisualBookSource?>(null) }
-    var isLoading by remember { mutableStateOf(true) }
-    var totalPages by remember { mutableIntStateOf(0) }
-    var currentPageIndex by remember { mutableIntStateOf(book.lastPageIndex.coerceAtLeast(0)) }
+    var source by remember(book.id) { mutableStateOf<VisualBookSource?>(null) }
+    var isLoading by remember(book.id) { mutableStateOf(true) }
+    var totalPages by remember(book.id) { mutableIntStateOf(0) }
+    var currentPageIndex by remember(book.id) { mutableIntStateOf(0) }
 
     var viewportW by remember { mutableIntStateOf(0) }
     var viewportH by remember { mutableIntStateOf(0) }
     var isDualPage by remember { mutableStateOf(false) }
 
-    var bitmapCache by remember { mutableStateOf<Map<Int, Bitmap>>(emptyMap()) }
-    var cacheEpoch by remember { mutableIntStateOf(0) }
+    var bitmapCache by remember(book.id) { mutableStateOf<Map<Int, Bitmap>>(emptyMap()) }
+    var cacheEpoch by remember(book.id) { mutableIntStateOf(0) }
 
-    var showMenu by remember { mutableStateOf(false) }
+    var showMenu by remember(book.id) { mutableStateOf(false) }
     var showSettingsSheet by remember { mutableStateOf(false) }
     var showTapZoneDialog by remember { mutableStateOf(false) }
     var toastMessage by remember { mutableStateOf<String?>(null) }
@@ -466,15 +466,16 @@ fun VisualReaderScreen(
                         .padding(horizontal = 14.dp, vertical = 10.dp)
                 ) {
                     if (totalPages > 1) {
+                        val maxPageIdx = (totalPages - 1).coerceAtLeast(1)
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(text = "${currentPageIndex + 1}", style = MaterialTheme.typography.labelMedium, color = barFg)
                             Slider(
-                                value = currentPageIndex.toFloat(),
+                                value = currentPageIndex.coerceIn(0, maxPageIdx).toFloat(),
                                 onValueChange = { v ->
                                     val snapped = if (isDualPage) (v.toInt() / 2) * 2 else v.toInt()
                                     currentPageIndex = snapped.coerceIn(0, (totalPages - 1).coerceAtLeast(0))
                                 },
-                                valueRange = 0f..(totalPages - 1).coerceAtLeast(1).toFloat(),
+                                valueRange = 0f..maxPageIdx.toFloat(),
                                 modifier = Modifier
                                     .weight(1f)
                                     .padding(horizontal = 8.dp)

@@ -171,9 +171,9 @@ final class AppRepository: @unchecked Sendable {
             let ctRaw = (obj["contentType"] as? String) ?? ""
             let contentType = BookContentType(rawValue: ctRaw) ?? defaultContentType
 
-            let lastCh = (obj["lastChapterIndex"] as? NSNumber)?.intValue ?? 0
-            let lastOff = (obj["lastCharOffset"] as? NSNumber)?.intValue ?? 0
-            let lastPg = (obj["lastPageIndex"] as? NSNumber)?.intValue ?? 0
+            let lastCh = max(0, (obj["lastChapterIndex"] as? NSNumber)?.intValue ?? 0)
+            let lastOff = max(0, (obj["lastCharOffset"] as? NSNumber)?.intValue ?? 0)
+            let lastPg = max(0, (obj["lastPageIndex"] as? NSNumber)?.intValue ?? 0)
             let rawProg = (obj["readingProgress"] as? NSNumber)?.floatValue ?? 0
             let progress = min(1.0, max(0.0, rawProg))
             let isRead = (obj["isRead"] as? Bool) ?? (progress >= 0.99)
