@@ -73,10 +73,30 @@ struct ReaderScreen: View {
         "\(rawChapters.count)|\(Int(contentWidthPt))x\(Int(contentHeightPt))|\(isDualPage)|\(settings.writingMode.rawValue)|\(settings.fontSizeSp)|\(settings.fontBold)|\(settings.letterSpacingEm)|\(settings.lineSpacingMultiplier)|\(settings.paragraphSpacingEm)|\(settings.paragraphIndentChars)|\(settings.customFontPath ?? "")|\(settings.chineseConvertMode.rawValue)"
     }
 
+    private func resolveMatchedPageIndex(
+        chapterPages: [PageContent],
+        desiredOffset: Int,
+        dual: Bool
+    ) -> Int {
+        guard !chapterPages.isEmpty else { return 0 }
+        let step = dual ? 2 : 1
+        let rawMatched: Int
+        if desiredOffset == Int.max {
+            rawMatched = chapterPages.count - 1
+        } else if desiredOffset <= 0 {
+            rawMatched = 0
+        } else if let exact = chapterPages.firstIndex(where: { desiredOffset >= $0.startOffset && desiredOffset <= $0.endOffset }) {
+            rawMatched = exact
+        } else {
+            rawMatched = max(0, chapterPages.lastIndex(where: { $0.startOffset <= desiredOffset }) ?? 0)
+        }
+        return step == 2 ? ((rawMatched / 2) * 2) : rawMatched
+    }
+
     private var currentSpread: SpreadSnapshot? {
-        guard let data = currentChapterData else { return nil }
+        guard !rawChapters.isEmpty, let data = currentChapterData else { return nil }
         let p1 = (currentPageIndex >= 0 && currentPageIndex < data.pages.count) ? data.pages[currentPageIndex] : nil
-        let p2 = (isDualPage && currentPageIndex + 1 < data.pages.count) ? data.pages[currentPageIndex + 1] : nil
+        let p2 = (isDualPage && currentPageIndex + 1 >= 0 && currentPageIndex + 1 < data.pages.count) ? data.pages[currentPageIndex + 1] : nil
         return SpreadSnapshot(
             chapterIndex: currentChapterIndex,
             chapterTitle: data.title,
@@ -87,9 +107,11 @@ struct ReaderScreen: View {
     }
 
     private var nextSpread: SpreadSnapshot? {
+        guard !rawChapters.isEmpty else { return nil }
         let step = isDualPage ? 2 : 1
-        if let cur = chapterCache[currentChapterIndex], currentPageIndex + step < cur.pages.count {
-            let idx1 = currentPageIndex + step
+        let idx1 = currentPageIndex + step
+        let nextChIdx = currentChapterIndex + 1
+        if let cur = chapterCache[currentChapterIndex], idx1 >= 0 && idx1 < cur.pages.count {
             let p1 = cur.pages[idx1]
             let p2 = (isDualPage && idx1 + 1 < cur.pages.count) ? cur.pages[idx1 + 1] : nil
             return SpreadSnapshot(
@@ -99,12 +121,12 @@ struct ReaderScreen: View {
                 secondPage: p2,
                 totalPagesInChapter: max(1, cur.pages.count)
             )
-        } else if currentChapterIndex + 1 < rawChapters.count {
-            if let nxt = chapterCache[currentChapterIndex + 1] {
+        } else if nextChIdx >= 0 && nextChIdx < rawChapters.count {
+            if let nxt = chapterCache[nextChIdx] {
                 let p1 = nxt.pages.first
                 let p2 = (isDualPage && nxt.pages.count > 1) ? nxt.pages[1] : nil
                 return SpreadSnapshot(
-                    chapterIndex: currentChapterIndex + 1,
+                    chapterIndex: nextChIdx,
                     chapterTitle: nxt.title,
                     firstPage: p1,
                     secondPage: p2,
@@ -112,8 +134,8 @@ struct ReaderScreen: View {
                 )
             } else {
                 return SpreadSnapshot(
-                    chapterIndex: currentChapterIndex + 1,
-                    chapterTitle: rawChapters[currentChapterIndex + 1].title,
+                    chapterIndex: nextChIdx,
+                    chapterTitle: rawChapters[nextChIdx].title,
                     firstPage: nil,
                     secondPage: nil,
                     totalPagesInChapter: 1
@@ -124,9 +146,11 @@ struct ReaderScreen: View {
     }
 
     private var prevSpread: SpreadSnapshot? {
+        guard !rawChapters.isEmpty else { return nil }
         let step = isDualPage ? 2 : 1
-        if let cur = chapterCache[currentChapterIndex], currentPageIndex - step >= 0 {
-            let idx1 = currentPageIndex - step
+        let idx1 = currentPageIndex - step
+        let prevChIdx = currentChapterIndex - 1
+        if let cur = chapterCache[currentChapterIndex], idx1 >= 0 && idx1 < cur.pages.count {
             let p1 = cur.pages[idx1]
             let p2 = (isDualPage && idx1 + 1 < cur.pages.count) ? cur.pages[idx1 + 1] : nil
             return SpreadSnapshot(
@@ -136,13 +160,13 @@ struct ReaderScreen: View {
                 secondPage: p2,
                 totalPagesInChapter: max(1, cur.pages.count)
             )
-        } else if currentChapterIndex - 1 >= 0 {
-            if let prv = chapterCache[currentChapterIndex - 1], !prv.pages.isEmpty {
+        } else if prevChIdx >= 0 && prevChIdx < rawChapters.count {
+            if let prv = chapterCache[prevChIdx], !prv.pages.isEmpty {
                 let lastStart = isDualPage ? (((prv.pages.count - 1) / 2) * 2) : (prv.pages.count - 1)
-                let p1 = prv.pages[lastStart]
-                let p2 = (isDualPage && lastStart + 1 < prv.pages.count) ? prv.pages[lastStart + 1] : nil
+                let p1 = (lastStart >= 0 && lastStart < prv.pages.count) ? prv.pages[lastStart] : nil
+                let p2 = (isDualPage && lastStart + 1 >= 0 && lastStart + 1 < prv.pages.count) ? prv.pages[lastStart + 1] : nil
                 return SpreadSnapshot(
-                    chapterIndex: currentChapterIndex - 1,
+                    chapterIndex: prevChIdx,
                     chapterTitle: prv.title,
                     firstPage: p1,
                     secondPage: p2,
@@ -150,8 +174,8 @@ struct ReaderScreen: View {
                 )
             } else {
                 return SpreadSnapshot(
-                    chapterIndex: currentChapterIndex - 1,
-                    chapterTitle: rawChapters[currentChapterIndex - 1].title,
+                    chapterIndex: prevChIdx,
+                    chapterTitle: rawChapters[prevChIdx].title,
                     firstPage: nil,
                     secondPage: nil,
                     totalPagesInChapter: 1
@@ -226,8 +250,6 @@ struct ReaderScreen: View {
             }
         }
         .onAppear {
-            currentChapterIndex = book.lastChapterIndex
-            targetCharOffset = book.lastCharOffset
             bookmarks = repository.loadBookmarksForBook(book.id)
             onMenuVisibilityChange(showMenu)
             loadBookChapters()
@@ -279,19 +301,21 @@ struct ReaderScreen: View {
                 chineseConvertMode: settings.chineseConvertMode,
                 bookmarks: bookmarks,
                 onSelectChapter: { idx in
-                    currentChapterIndex = idx
+                    guard !rawChapters.isEmpty else { return }
+                    currentChapterIndex = min(max(0, idx), rawChapters.count - 1)
                     targetCharOffset = 0
                     currentPageIndex = 0
                     showTocAndBookmarks = false
                     showMenu = false
                 },
                 onSelectBookmark: { bm in
-                    currentChapterIndex = bm.chapterIndex
-                    targetCharOffset = bm.charOffset
-                    if let cur = chapterCache[bm.chapterIndex] {
-                        let step = isDualPage ? 2 : 1
-                        let matched = cur.pages.firstIndex(where: { bm.charOffset >= $0.startOffset && bm.charOffset <= $0.endOffset }) ?? 0
-                        currentPageIndex = step == 2 ? ((matched / 2) * 2) : matched
+                    guard !rawChapters.isEmpty else { return }
+                    let safeCh = min(max(0, bm.chapterIndex), rawChapters.count - 1)
+                    let safeOff = max(0, bm.charOffset)
+                    currentChapterIndex = safeCh
+                    targetCharOffset = safeOff
+                    if let cur = chapterCache[safeCh] {
+                        currentPageIndex = resolveMatchedPageIndex(chapterPages: cur.pages, desiredOffset: safeOff, dual: isDualPage)
                     }
                     showTocAndBookmarks = false
                     showMenu = false
@@ -306,12 +330,13 @@ struct ReaderScreen: View {
             FullBookSearchSheet(
                 chapters: rawChapters,
                 onSelectHit: { hit in
-                    currentChapterIndex = hit.chapterIndex
-                    targetCharOffset = hit.charOffset
-                    if let cur = chapterCache[hit.chapterIndex] {
-                        let step = isDualPage ? 2 : 1
-                        let matched = cur.pages.firstIndex(where: { hit.charOffset >= $0.startOffset && hit.charOffset <= $0.endOffset }) ?? 0
-                        currentPageIndex = step == 2 ? ((matched / 2) * 2) : matched
+                    guard !rawChapters.isEmpty else { return }
+                    let safeCh = min(max(0, hit.chapterIndex), rawChapters.count - 1)
+                    let safeOff = max(0, hit.charOffset)
+                    currentChapterIndex = safeCh
+                    targetCharOffset = safeOff
+                    if let cur = chapterCache[safeCh] {
+                        currentPageIndex = resolveMatchedPageIndex(chapterPages: cur.pages, desiredOffset: safeOff, dual: isDualPage)
                     }
                     showSearchSheet = false
                     showMenu = false
@@ -520,14 +545,14 @@ struct ReaderScreen: View {
         let fileURL = repository.resolveBookFileURL(book)
         let format = book.format
         let fallbackTitle = book.title
-        let savedCh = book.lastChapterIndex
-        let savedOff = book.lastCharOffset
+        let savedCh = max(0, book.lastChapterIndex)
+        let savedOff = max(0, book.lastCharOffset)
 
         Task.detached(priority: .userInitiated) {
             let parsed = BookParser.parseFullBook(fileURL: fileURL, format: format, fallbackTitle: fallbackTitle)
             await MainActor.run {
                 self.rawChapters = parsed.chapters
-                self.currentChapterIndex = min(max(0, savedCh), max(0, parsed.chapters.count - 1))
+                self.currentChapterIndex = min(savedCh, max(0, parsed.chapters.count - 1))
                 self.targetCharOffset = savedOff
                 self.isLoading = false
             }
@@ -588,23 +613,20 @@ struct ReaderScreen: View {
         guard let curData = await paginateSingleChapter(chIdx) else { return }
         if Task.isCancelled { return }
 
-        let step = dual ? 2 : 1
-        let matched: Int = {
-            if desiredOffset == Int.max {
-                return max(0, curData.pages.count - 1)
-            }
-            return curData.pages.firstIndex(where: { desiredOffset >= $0.startOffset && desiredOffset <= $0.endOffset }) ?? 0
-        }()
-        let alignedPage = step == 2 ? ((matched / 2) * 2) : matched
+        let alignedPage = resolveMatchedPageIndex(
+            chapterPages: curData.pages,
+            desiredOffset: desiredOffset,
+            dual: dual
+        )
 
         var newCache: [Int: PaginatedChapterData] = [chIdx: curData]
         chapterCache = newCache
         currentPageIndex = alignedPage
 
-        if chIdx + 1 < rawChapters.count, let nxt = await paginateSingleChapter(chIdx + 1) {
+        if chIdx + 1 >= 0 && chIdx + 1 < rawChapters.count, let nxt = await paginateSingleChapter(chIdx + 1) {
             if !Task.isCancelled { newCache[chIdx + 1] = nxt }
         }
-        if chIdx - 1 >= 0, let prv = await paginateSingleChapter(chIdx - 1) {
+        if chIdx - 1 >= 0 && chIdx - 1 < rawChapters.count, let prv = await paginateSingleChapter(chIdx - 1) {
             if !Task.isCancelled { newCache[chIdx - 1] = prv }
         }
         if !Task.isCancelled {
@@ -622,21 +644,18 @@ struct ReaderScreen: View {
             working[chIdx] = d
         }
         if let curPages = working[chIdx]?.pages, !curPages.isEmpty {
-            let step = isDualPage ? 2 : 1
-            let matched: Int = {
-                if targetCharOffset == Int.max {
-                    return max(0, curPages.count - 1)
-                }
-                return curPages.firstIndex(where: { targetCharOffset >= $0.startOffset && targetCharOffset <= $0.endOffset }) ?? 0
-            }()
-            currentPageIndex = step == 2 ? ((matched / 2) * 2) : matched
+            currentPageIndex = resolveMatchedPageIndex(
+                chapterPages: curPages,
+                desiredOffset: targetCharOffset,
+                dual: isDualPage
+            )
         }
 
-        if chIdx + 1 < rawChapters.count && working[chIdx + 1] == nil,
+        if chIdx + 1 >= 0 && chIdx + 1 < rawChapters.count && working[chIdx + 1] == nil,
            let nxt = await paginateSingleChapter(chIdx + 1) {
             working[chIdx + 1] = nxt
         }
-        if chIdx - 1 >= 0 && working[chIdx - 1] == nil,
+        if chIdx - 1 >= 0 && chIdx - 1 < rawChapters.count && working[chIdx - 1] == nil,
            let prv = await paginateSingleChapter(chIdx - 1) {
             working[chIdx - 1] = prv
         }
@@ -668,7 +687,7 @@ struct ReaderScreen: View {
         if currentPageIndex - step >= 0 {
             currentPageIndex -= step
             return true
-        } else if currentChapterIndex - 1 >= 0 {
+        } else if currentChapterIndex - 1 >= 0 && currentChapterIndex - 1 < rawChapters.count {
             let prevIdx = currentChapterIndex - 1
             let prevPages = chapterCache[prevIdx]?.pages
             currentChapterIndex = prevIdx
@@ -696,7 +715,9 @@ struct ReaderScreen: View {
     }
 
     private func persistReadingProgress(synchronous: Bool = false) {
-        guard currentPageIndex >= 0 && currentPageIndex < pages.count else { return }
+        guard !rawChapters.isEmpty,
+              currentChapterIndex >= 0 && currentChapterIndex < rawChapters.count,
+              currentPageIndex >= 0 && currentPageIndex < pages.count else { return }
         let page = pages[currentPageIndex]
         targetCharOffset = page.startOffset
 
@@ -711,8 +732,8 @@ struct ReaderScreen: View {
         if isAtFinalSpread {
             progressFraction = 1.0
         } else {
-            let prevChars = (currentChapterIndex < prefix.count) ? prefix[currentChapterIndex] : 0
-            let curChChars = max(1, (currentChapterIndex < rawChapters.count) ? rawChapters[currentChapterIndex].content.count : 1)
+            let prevChars = (currentChapterIndex >= 0 && currentChapterIndex < prefix.count) ? prefix[currentChapterIndex] : 0
+            let curChChars = max(1, rawChapters[currentChapterIndex].content.count)
             let chPageRatio = Float(min(pages.count, currentPageIndex + step)) / Float(max(1, pages.count))
             progressFraction = min(1.0, max(0.0, (Float(prevChars) + Float(curChChars) * chPageRatio) / Float(totalBookChars)))
         }

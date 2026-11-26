@@ -63,6 +63,7 @@ struct ContentView: View {
                             },
                             onExitReader: handleExitReader
                         )
+                        .id(current.id)
                         .persistentSystemOverlays(isReaderMenuVisible ? .automatic : .hidden)
                     } else {
                         ReaderScreen(
@@ -91,6 +92,7 @@ struct ContentView: View {
                             },
                             onExitReader: handleExitReader
                         )
+                        .id(current.id)
                         .persistentSystemOverlays(isReaderMenuVisible ? .automatic : .hidden)
                     }
                 } else {

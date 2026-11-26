@@ -79,10 +79,10 @@ fun ReaderScreen(
 ) {
     val scope = rememberCoroutineScope()
 
-    var isLoading by remember { mutableStateOf(true) }
-    var rawChapters by remember { mutableStateOf<List<Chapter>>(emptyList()) }
-    var currentChapterIndex by remember { mutableIntStateOf(book.lastChapterIndex) }
-    var targetCharOffset by remember { mutableIntStateOf(book.lastCharOffset) }
+    var isLoading by remember(book.id) { mutableStateOf(true) }
+    var rawChapters by remember(book.id) { mutableStateOf<List<Chapter>>(emptyList()) }
+    var currentChapterIndex by remember(book.id) { mutableIntStateOf(0) }
+    var targetCharOffset by remember(book.id) { mutableIntStateOf(0) }
 
     var viewportWidthPx by remember { mutableIntStateOf(0) }
     var viewportHeightPx by remember { mutableIntStateOf(0) }
@@ -105,15 +105,15 @@ fun ReaderScreen(
     val contentWidthPx = layoutMetrics?.contentWidthPx ?: 0f
     val contentHeightPx = layoutMetrics?.contentHeightPx ?: 0f
 
-    var chapterCache by remember { mutableStateOf<Map<Int, PaginatedChapterData>>(emptyMap()) }
-    var currentPageIndex by remember { mutableIntStateOf(0) }
+    var chapterCache by remember(book.id) { mutableStateOf<Map<Int, PaginatedChapterData>>(emptyMap()) }
+    var currentPageIndex by remember(book.id) { mutableIntStateOf(0) }
 
-    var showMenu by remember { mutableStateOf(false) }
+    var showMenu by remember(book.id) { mutableStateOf(false) }
     var showSettingsSheet by remember { mutableStateOf(false) }
     var showTocAndBookmarks by remember { mutableStateOf(false) }
     var showSearchDialog by remember { mutableStateOf(false) }
     var showTapZoneDialog by remember { mutableStateOf(false) }
-    var bookmarks by remember { mutableStateOf(repository.loadBookmarksForBook(book.id)) }
+    var bookmarks by remember(book.id) { mutableStateOf(repository.loadBookmarksForBook(book.id)) }
     var toastMessage by remember { mutableStateOf<String?>(null) }
 
     var availableFonts by remember { mutableStateOf<List<LocalFontItem>>(emptyList()) }
@@ -136,10 +136,31 @@ fun ReaderScreen(
         val parsed = withContext(Dispatchers.IO) {
             BookParser.parseFullBook(File(book.localPath), book.format, book.title)
         }
+        val safeCh = book.lastChapterIndex.coerceIn(0, (parsed.chapters.size - 1).coerceAtLeast(0))
+        val safeOff = book.lastCharOffset.coerceAtLeast(0)
         rawChapters = parsed.chapters
-        currentChapterIndex = book.lastChapterIndex.coerceIn(0, (parsed.chapters.size - 1).coerceAtLeast(0))
-        targetCharOffset = book.lastCharOffset
+        currentChapterIndex = safeCh
+        targetCharOffset = safeOff
         isLoading = false
+    }
+
+    fun resolveMatchedPageIndex(
+        chapterPages: List<PageContent>,
+        desiredOffset: Int,
+        dual: Boolean
+    ): Int {
+        if (chapterPages.isEmpty()) return 0
+        val step = if (dual) 2 else 1
+        val rawMatched = when {
+            desiredOffset == Int.MAX_VALUE -> chapterPages.lastIndex
+            desiredOffset <= 0 -> 0
+            else -> {
+                chapterPages.indexOfFirst { desiredOffset in it.startOffset..it.endOffset }
+                    .takeIf { it >= 0 }
+                    ?: chapterPages.indexOfLast { it.startOffset <= desiredOffset }.coerceAtLeast(0)
+            }
+        }
+        return if (step == 2) (rawMatched / 2) * 2 else rawMatched
     }
 
     suspend fun paginateChapterIndex(index: Int): PaginatedChapterData? {
@@ -183,14 +204,10 @@ fun ReaderScreen(
     ) {
         if (rawChapters.isEmpty() || contentWidthPx <= 0f || contentHeightPx <= 0f) return@LaunchedEffect
         val curData = paginateChapterIndex(currentChapterIndex) ?: return@LaunchedEffect
-        val step = if (isDualPage) 2 else 1
-        val matched = curData.pages.indexOfFirst { targetCharOffset in it.startOffset..it.endOffset }
-            .takeIf { it >= 0 }
-            ?: if (targetCharOffset == Int.MAX_VALUE) (curData.pages.size - 1).coerceAtLeast(0) else 0
-        currentPageIndex = if (step == 2) (matched / 2) * 2 else matched
+        currentPageIndex = resolveMatchedPageIndex(curData.pages, targetCharOffset, isDualPage)
 
-        val nextData = if (currentChapterIndex + 1 < rawChapters.size) paginateChapterIndex(currentChapterIndex + 1) else null
-        val prevData = if (currentChapterIndex - 1 >= 0) paginateChapterIndex(currentChapterIndex - 1) else null
+        val nextData = if (currentChapterIndex + 1 in rawChapters.indices) paginateChapterIndex(currentChapterIndex + 1) else null
+        val prevData = if (currentChapterIndex - 1 in rawChapters.indices) paginateChapterIndex(currentChapterIndex - 1) else null
 
         val newMap = mutableMapOf(currentChapterIndex to curData)
         if (nextData != null) newMap[currentChapterIndex + 1] = nextData
@@ -206,18 +223,12 @@ fun ReaderScreen(
         }
         val curPages = updated[currentChapterIndex]?.pages.orEmpty()
         if (curPages.isNotEmpty()) {
-            val step = if (isDualPage) 2 else 1
-            val matched = if (targetCharOffset == Int.MAX_VALUE) {
-                (curPages.size - 1).coerceAtLeast(0)
-            } else {
-                curPages.indexOfFirst { targetCharOffset in it.startOffset..it.endOffset }.takeIf { it >= 0 } ?: 0
-            }
-            currentPageIndex = if (step == 2) (matched / 2) * 2 else matched
+            currentPageIndex = resolveMatchedPageIndex(curPages, targetCharOffset, isDualPage)
         }
-        if (currentChapterIndex + 1 < rawChapters.size && !updated.containsKey(currentChapterIndex + 1)) {
+        if (currentChapterIndex + 1 in rawChapters.indices && !updated.containsKey(currentChapterIndex + 1)) {
             paginateChapterIndex(currentChapterIndex + 1)?.let { updated[currentChapterIndex + 1] = it }
         }
-        if (currentChapterIndex - 1 >= 0 && !updated.containsKey(currentChapterIndex - 1)) {
+        if (currentChapterIndex - 1 in rawChapters.indices && !updated.containsKey(currentChapterIndex - 1)) {
             paginateChapterIndex(currentChapterIndex - 1)?.let { updated[currentChapterIndex - 1] = it }
         }
         chapterCache = updated.filterKeys { kotlin.math.abs(it - currentChapterIndex) <= 2 }
@@ -235,6 +246,7 @@ fun ReaderScreen(
     }
 
     fun computeCurrentProgress(): Pair<Int, Float>? {
+        if (rawChapters.isEmpty()) return null
         val page = pages.getOrNull(currentPageIndex) ?: return null
         val totalBookChars = chapterPrefixChars.lastOrNull()?.coerceAtLeast(1L) ?: 1L
         val step = if (isDualPage) 2 else 1
@@ -287,83 +299,97 @@ fun ReaderScreen(
         }
     }
 
-    val currentSpread = remember(currentChapterIndex, currentChapterData, currentPageIndex, isDualPage) {
-        currentChapterData?.let { data ->
-            SpreadSnapshot(
-                chapterIndex = currentChapterIndex,
-                chapterTitle = data.title,
-                firstPage = data.pages.getOrNull(currentPageIndex),
-                secondPage = if (isDualPage) data.pages.getOrNull(currentPageIndex + 1) else null,
-                totalPagesInChapter = data.pages.size.coerceAtLeast(1)
-            )
+    val currentSpread = remember(currentChapterIndex, currentChapterData, currentPageIndex, isDualPage, rawChapters) {
+        if (rawChapters.isEmpty()) {
+            null
+        } else {
+            currentChapterData?.let { data ->
+                SpreadSnapshot(
+                    chapterIndex = currentChapterIndex,
+                    chapterTitle = data.title,
+                    firstPage = data.pages.getOrNull(currentPageIndex),
+                    secondPage = if (isDualPage) data.pages.getOrNull(currentPageIndex + 1) else null,
+                    totalPagesInChapter = data.pages.size.coerceAtLeast(1)
+                )
+            }
         }
     }
 
     val nextSpread = remember(currentChapterIndex, chapterCache, currentPageIndex, isDualPage, rawChapters) {
-        val step = if (isDualPage) 2 else 1
-        val cur = chapterCache[currentChapterIndex]
-        if (cur != null && currentPageIndex + step < cur.pages.size) {
-            SpreadSnapshot(
-                chapterIndex = currentChapterIndex,
-                chapterTitle = cur.title,
-                firstPage = cur.pages.getOrNull(currentPageIndex + step),
-                secondPage = if (isDualPage) cur.pages.getOrNull(currentPageIndex + step + 1) else null,
-                totalPagesInChapter = cur.pages.size.coerceAtLeast(1)
-            )
-        } else if (currentChapterIndex + 1 < rawChapters.size) {
-            val nxt = chapterCache[currentChapterIndex + 1]
-            if (nxt != null) {
+        if (rawChapters.isEmpty()) {
+            null
+        } else {
+            val step = if (isDualPage) 2 else 1
+            val cur = chapterCache[currentChapterIndex]
+            val nextChIdx = currentChapterIndex + 1
+            if (cur != null && currentPageIndex + step in cur.pages.indices) {
                 SpreadSnapshot(
-                    chapterIndex = currentChapterIndex + 1,
-                    chapterTitle = nxt.title,
-                    firstPage = nxt.pages.getOrNull(0),
-                    secondPage = if (isDualPage) nxt.pages.getOrNull(1) else null,
-                    totalPagesInChapter = nxt.pages.size.coerceAtLeast(1)
+                    chapterIndex = currentChapterIndex,
+                    chapterTitle = cur.title,
+                    firstPage = cur.pages.getOrNull(currentPageIndex + step),
+                    secondPage = if (isDualPage) cur.pages.getOrNull(currentPageIndex + step + 1) else null,
+                    totalPagesInChapter = cur.pages.size.coerceAtLeast(1)
                 )
-            } else {
-                SpreadSnapshot(
-                    chapterIndex = currentChapterIndex + 1,
-                    chapterTitle = rawChapters[currentChapterIndex + 1].title,
-                    firstPage = null,
-                    secondPage = null,
-                    totalPagesInChapter = 1
-                )
-            }
-        } else null
+            } else if (nextChIdx in rawChapters.indices) {
+                val nxt = chapterCache[nextChIdx]
+                if (nxt != null) {
+                    SpreadSnapshot(
+                        chapterIndex = nextChIdx,
+                        chapterTitle = nxt.title,
+                        firstPage = nxt.pages.getOrNull(0),
+                        secondPage = if (isDualPage) nxt.pages.getOrNull(1) else null,
+                        totalPagesInChapter = nxt.pages.size.coerceAtLeast(1)
+                    )
+                } else {
+                    SpreadSnapshot(
+                        chapterIndex = nextChIdx,
+                        chapterTitle = rawChapters.getOrNull(nextChIdx)?.title.orEmpty(),
+                        firstPage = null,
+                        secondPage = null,
+                        totalPagesInChapter = 1
+                    )
+                }
+            } else null
+        }
     }
 
     val prevSpread = remember(currentChapterIndex, chapterCache, currentPageIndex, isDualPage, rawChapters) {
-        val step = if (isDualPage) 2 else 1
-        val cur = chapterCache[currentChapterIndex]
-        if (cur != null && currentPageIndex - step >= 0) {
-            SpreadSnapshot(
-                chapterIndex = currentChapterIndex,
-                chapterTitle = cur.title,
-                firstPage = cur.pages.getOrNull(currentPageIndex - step),
-                secondPage = if (isDualPage) cur.pages.getOrNull(currentPageIndex - step + 1) else null,
-                totalPagesInChapter = cur.pages.size.coerceAtLeast(1)
-            )
-        } else if (currentChapterIndex - 1 >= 0) {
-            val prv = chapterCache[currentChapterIndex - 1]
-            if (prv != null && prv.pages.isNotEmpty()) {
-                val lastStart = if (isDualPage) ((prv.pages.size - 1) / 2) * 2 else prv.pages.size - 1
+        if (rawChapters.isEmpty()) {
+            null
+        } else {
+            val step = if (isDualPage) 2 else 1
+            val cur = chapterCache[currentChapterIndex]
+            val prevChIdx = currentChapterIndex - 1
+            if (cur != null && currentPageIndex - step in cur.pages.indices) {
                 SpreadSnapshot(
-                    chapterIndex = currentChapterIndex - 1,
-                    chapterTitle = prv.title,
-                    firstPage = prv.pages.getOrNull(lastStart),
-                    secondPage = if (isDualPage) prv.pages.getOrNull(lastStart + 1) else null,
-                    totalPagesInChapter = prv.pages.size.coerceAtLeast(1)
+                    chapterIndex = currentChapterIndex,
+                    chapterTitle = cur.title,
+                    firstPage = cur.pages.getOrNull(currentPageIndex - step),
+                    secondPage = if (isDualPage) cur.pages.getOrNull(currentPageIndex - step + 1) else null,
+                    totalPagesInChapter = cur.pages.size.coerceAtLeast(1)
                 )
-            } else {
-                SpreadSnapshot(
-                    chapterIndex = currentChapterIndex - 1,
-                    chapterTitle = rawChapters[currentChapterIndex - 1].title,
-                    firstPage = null,
-                    secondPage = null,
-                    totalPagesInChapter = 1
-                )
-            }
-        } else null
+            } else if (prevChIdx in rawChapters.indices) {
+                val prv = chapterCache[prevChIdx]
+                if (prv != null && prv.pages.isNotEmpty()) {
+                    val lastStart = if (isDualPage) ((prv.pages.size - 1) / 2) * 2 else prv.pages.size - 1
+                    SpreadSnapshot(
+                        chapterIndex = prevChIdx,
+                        chapterTitle = prv.title,
+                        firstPage = prv.pages.getOrNull(lastStart),
+                        secondPage = if (isDualPage) prv.pages.getOrNull(lastStart + 1) else null,
+                        totalPagesInChapter = prv.pages.size.coerceAtLeast(1)
+                    )
+                } else {
+                    SpreadSnapshot(
+                        chapterIndex = prevChIdx,
+                        chapterTitle = rawChapters.getOrNull(prevChIdx)?.title.orEmpty(),
+                        firstPage = null,
+                        secondPage = null,
+                        totalPagesInChapter = 1
+                    )
+                }
+            } else null
+        }
     }
 
     val onNextSpreadAction by rememberUpdatedState {
@@ -669,13 +695,14 @@ fun ReaderScreen(
                             ) { Text("上一章") }
 
                             if (pages.size > 1) {
+                                val maxPageIdx = (pages.size - 1).coerceAtLeast(1)
                                 Slider(
-                                    value = currentPageIndex.toFloat(),
+                                    value = currentPageIndex.coerceIn(0, maxPageIdx).toFloat(),
                                     onValueChange = { v ->
                                         val snapped = if (isDualPage) (v.toInt() / 2) * 2 else v.toInt()
                                         currentPageIndex = snapped.coerceIn(0, (pages.size - 1).coerceAtLeast(0))
                                     },
-                                    valueRange = 0f..(pages.size - 1).coerceAtLeast(1).toFloat(),
+                                    valueRange = 0f..maxPageIdx.toFloat(),
                                     modifier = Modifier.weight(1f)
                                 )
                             } else {
@@ -1011,8 +1038,10 @@ fun ReaderScreen(
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .clickable {
-                                            currentChapterIndex = bm.chapterIndex
-                                            targetCharOffset = bm.charOffset
+                                            if (rawChapters.isNotEmpty()) {
+                                                currentChapterIndex = bm.chapterIndex.coerceIn(0, rawChapters.lastIndex)
+                                                targetCharOffset = bm.charOffset.coerceAtLeast(0)
+                                            }
                                             showTocAndBookmarks = false
                                             showMenu = false
                                         }

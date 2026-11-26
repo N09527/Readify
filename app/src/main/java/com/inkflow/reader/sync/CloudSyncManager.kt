@@ -423,9 +423,9 @@ class CloudSyncManager(private val repository: AppRepository) {
                             if (legacy.isNotBlank() && legacy != "未分類") listOf(legacy) else emptyList()
                         }
                     },
-                    lastChapterIndex = obj.optInt("lastChapterIndex", 0),
-                    lastCharOffset = obj.optInt("lastCharOffset", 0),
-                    lastPageIndex = obj.optInt("lastPageIndex", 0),
+                    lastChapterIndex = obj.optInt("lastChapterIndex", 0).coerceAtLeast(0),
+                    lastCharOffset = obj.optInt("lastCharOffset", 0).coerceAtLeast(0),
+                    lastPageIndex = obj.optInt("lastPageIndex", 0).coerceAtLeast(0),
                     lastReadTime = obj.optLong("lastReadTime", 0L),
                     addedTime = obj.optLong("addedTime", System.currentTimeMillis()),
                     sourceFileName = obj.optString("sourceFileName", ""),

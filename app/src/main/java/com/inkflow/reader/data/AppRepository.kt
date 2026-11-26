@@ -104,9 +104,9 @@ class AppRepository(private val context: Context) {
                     if (raw.isBlank()) defaultContentType else BookContentType.valueOf(raw)
                 }.getOrDefault(defaultContentType)
 
-                val lastCh = obj.optInt("lastChapterIndex", 0)
-                val lastOff = obj.optInt("lastCharOffset", 0)
-                val lastPg = obj.optInt("lastPageIndex", 0)
+                val lastCh = obj.optInt("lastChapterIndex", 0).coerceAtLeast(0)
+                val lastOff = obj.optInt("lastCharOffset", 0).coerceAtLeast(0)
+                val lastPg = obj.optInt("lastPageIndex", 0).coerceAtLeast(0)
                 val progress = obj.optDouble("readingProgress", 0.0).toFloat().coerceIn(0f, 1f)
                 val isRead = obj.optBoolean("isRead", progress >= 0.99f)
                 val hasStarted = obj.optBoolean(

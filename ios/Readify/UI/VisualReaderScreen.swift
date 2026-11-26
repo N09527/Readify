@@ -144,7 +144,6 @@ struct VisualReaderScreen: View {
             }
         }
         .onAppear {
-            currentPageIndex = max(0, book.lastPageIndex)
             onMenuVisibilityChange(showMenu)
             openVisualSource()
         }
