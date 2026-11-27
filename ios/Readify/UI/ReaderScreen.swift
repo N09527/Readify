@@ -214,7 +214,6 @@ struct ReaderScreen: View {
                     viewportHeightPt = h
                 }
             )
-            .ignoresSafeArea()
 
             VolumePageTurnBridge(
                 enabled: settings.volumeKeyPageTurn,
@@ -249,6 +248,8 @@ struct ReaderScreen: View {
                 menuOverlay
             }
         }
+        .background(settings.effectiveTheme.bgSwiftUIColor.ignoresSafeArea())
+        .preferredColorScheme(settings.effectiveTheme.isDark ? .dark : .light)
         .onAppear {
             bookmarks = repository.loadBookmarksForBook(book.id)
             onMenuVisibilityChange(showMenu)
@@ -467,6 +468,7 @@ struct ReaderScreen: View {
                     .padding(.bottom, 8)
                 }
             }
+            .padding(.top, 4)
             .background(barBg.ignoresSafeArea(edges: .top))
             .overlay(alignment: .bottom) { Divider() }
 

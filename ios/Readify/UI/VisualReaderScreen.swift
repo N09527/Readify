@@ -50,6 +50,12 @@ struct VisualReaderScreen: View {
         )
     }
 
+    private var canvasBgColor: Color {
+        if settings.eInkMode { return .white }
+        if isPdf && settings.pdfNightInvert { return Color(uiColor: UIColor(hex: 0x121212)) }
+        return Color(uiColor: UIColor(hex: 0x1A1D21))
+    }
+
     var body: some View {
         ZStack {
             VisualPageCanvasRepresentable(
@@ -96,7 +102,6 @@ struct VisualReaderScreen: View {
                     isDualPage = dual
                 }
             )
-            .ignoresSafeArea()
 
             VolumePageTurnBridge(
                 enabled: settings.volumeKeyPageTurn,
@@ -108,8 +113,7 @@ struct VisualReaderScreen: View {
 
             if isLoading {
                 ZStack {
-                    (settings.eInkMode ? Color.white : Color(uiColor: UIColor(hex: 0x1A1D21)))
-                        .ignoresSafeArea()
+                    canvasBgColor.ignoresSafeArea()
                     VStack(spacing: 12) {
                         ProgressView()
                             .tint(settings.eInkMode ? .black : .white)
@@ -120,8 +124,7 @@ struct VisualReaderScreen: View {
                 }
             } else if totalPages == 0 {
                 ZStack {
-                    (settings.eInkMode ? Color.white : Color(uiColor: UIColor(hex: 0x1A1D21)))
-                        .ignoresSafeArea()
+                    canvasBgColor.ignoresSafeArea()
                     VStack(spacing: 12) {
                         Text("此檔案內找不到可顯示的圖片或頁面")
                             .foregroundStyle(settings.eInkMode ? .black : .white)
@@ -143,6 +146,8 @@ struct VisualReaderScreen: View {
                 menuOverlay
             }
         }
+        .background(canvasBgColor.ignoresSafeArea())
+        .preferredColorScheme(settings.eInkMode ? .light : .dark)
         .onAppear {
             onMenuVisibilityChange(showMenu)
             openVisualSource()
@@ -296,6 +301,7 @@ struct VisualReaderScreen: View {
                     .padding(.bottom, 8)
                 }
             }
+            .padding(.top, 4)
             .background(barBg.ignoresSafeArea(edges: .top))
             .overlay(alignment: .bottom) { Divider() }
 

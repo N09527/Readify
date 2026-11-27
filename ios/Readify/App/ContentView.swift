@@ -34,6 +34,7 @@ struct ContentView: View {
                             showCloudSync = false
                         }
                     )
+                    .preferredColorScheme(settings.eInkMode ? .light : nil)
                 } else if let current = activeBook {
                     let useVisualReader: Bool = {
                         switch current.contentType {
@@ -174,6 +175,7 @@ struct ContentView: View {
                             showCloudSync = true
                         }
                     )
+                    .preferredColorScheme(settings.eInkMode ? .light : nil)
                 }
             }
 
@@ -200,7 +202,6 @@ struct ContentView: View {
                 .shadow(color: settings.eInkMode ? .clear : .black.opacity(0.18), radius: 12, y: 4)
             }
         }
-        .statusBarHidden(activeBook != nil && !showCloudSync && !isReaderMenuVisible)
         .sheet(item: $activePicker) { pickerMode in
             DocumentPickerRepresentable(
                 mode: pickerMode,
